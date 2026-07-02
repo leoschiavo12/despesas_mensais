@@ -328,13 +328,17 @@ with aba_dash:
     limite_efetivo = limite_mensal + gasto_parcel
     disponivel = limite_efetivo - total_gasto
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Limite", formatar_brl(limite_efetivo), "base + parcel." if gasto_parcel > 0 else "100%")
-    c2.metric("Despesas do mês", formatar_brl(gasto_outros),
-              fmt_pct(gasto_outros / limite_efetivo * 100) + " do limite" if limite_efetivo > 0 else None)
-    c3.metric("Disponível", formatar_brl(abs(disponivel)),
-              (fmt_pct(max(0, disponivel) / limite_efetivo * 100) + " restante") if disponivel >= 0 else "excedido",
-              delta_color="normal" if disponivel >= 0 else "inverse")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Despesas do mês", formatar_brl(gasto_outros))
+        if limite_efetivo > 0:
+            st.caption(fmt_pct(gasto_outros / limite_efetivo * 100) + " do limite")
+    with c2:
+        st.metric("Disponível", formatar_brl(abs(disponivel)))
+        if disponivel >= 0:
+            st.caption(fmt_pct(max(0, disponivel) / limite_efetivo * 100) + " restante" if limite_efetivo > 0 else "")
+        else:
+            st.caption("excedido")
 
     st.progress(min(total_gasto / limite_efetivo, 1.0) if limite_efetivo > 0 else 0)
 
