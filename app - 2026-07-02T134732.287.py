@@ -15,6 +15,7 @@ CONFIGURAÇÃO NECESSÁRIA ANTES DO DEPLOY:
 import streamlit as st
 import pandas as pd
 import gspread
+from gspread.utils import ValueRenderOption
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date
 import plotly.graph_objects as go
@@ -94,7 +95,7 @@ def carregar_categorias():
     sh = get_spreadsheet()
     garantir_abas(sh)
     ws = sh.worksheet(ABA_CATEGORIAS)
-    df = pd.DataFrame(ws.get_all_records())
+    df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
     if df.empty or "valor_alvo" not in df.columns:
         # Planilha ainda no esquema antigo (percentual) ou vazia — usa os padrões limpos.
         # Abra a aba Orçamento e clique em "Salvar orçamento" uma vez para gravar
@@ -111,7 +112,7 @@ def carregar_config():
     sh = get_spreadsheet()
     garantir_abas(sh)
     ws = sh.worksheet(ABA_CONFIG)
-    df = pd.DataFrame(ws.get_all_records())
+    df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
     limite = LIMITE_PADRAO
     if not df.empty:
         linha = df[df["chave"] == "limite_mensal"]
@@ -126,7 +127,7 @@ def carregar_lancamentos():
         sh = get_spreadsheet()
         garantir_abas(sh)
         ws = sh.worksheet(ABA_LANCAMENTOS)
-        df = pd.DataFrame(ws.get_all_records())
+        df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
         if not df.empty:
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
             df["data"] = pd.to_datetime(df["data"]).dt.date
@@ -147,7 +148,7 @@ def salvar_lancamento(data_str, categoria, descricao, valor):
 def excluir_lancamento(data_str, categoria, descricao, valor):
     """Exclusão por conteúdo, não por índice — evita quebra de posição em uso concorrente."""
     ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
-    registros = ws.get_all_records()
+    registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(registros, start=2):  # linha 1 = cabeçalho
         if (str(r["data"]) == str(data_str) and r["categoria"] == categoria
                 and str(r["descricao"]) == str(descricao) and float(r["valor"]) == float(valor)):
