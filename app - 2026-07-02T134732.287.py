@@ -342,7 +342,6 @@ with aba_dash:
 
     st.progress(min(total_gasto / limite_efetivo, 1.0) if limite_efetivo > 0 else 0)
 
-    st.markdown("##### Composição da fatura")
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_outros > 0:
@@ -355,7 +354,7 @@ with aba_dash:
     if valores:
         fig = go.Figure(data=[go.Pie(labels=labels, values=valores, hole=0.65, marker=dict(colors=cores))])
         fig.update_layout(showlegend=True, margin=dict(t=10, b=10, l=10, r=10), height=280)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
         st.caption("Sem lançamentos neste mês.")
 
