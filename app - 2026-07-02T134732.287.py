@@ -21,7 +21,7 @@ import plotly.graph_objects as go
 
 # ───────────────────────── CONFIG ─────────────────────────
 
-SPREADSHEET_ID = "COLE_AQUI_O_ID_DA_PLANILHA_NOVA"
+SPREADSHEET_ID = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
 
 ABA_LANCAMENTOS = "lancamentos"
 ABA_CATEGORIAS = "categorias"
