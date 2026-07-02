@@ -306,6 +306,14 @@ with aba_lancar:
                 )
                 st.progress(pct)
 
+            gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
+            if gasto_parcel_mes > 0:
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+                    f"<span>Parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
     form_lancamento()
 
 # ───────────────────────── ABA: DASHBOARD ─────────────────────────
@@ -383,7 +391,13 @@ with aba_dash:
         )
         st.progress(pct)
 
-# ───────────────────────── ABA: HISTÓRICO ─────────────────────────
+    gasto_parcel_dash = gasto_por_cat.get(FIXED_ID, 0)
+    if gasto_parcel_dash > 0:
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+            f"<span>Parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_dash)}</span></div>",
+            unsafe_allow_html=True,
+        )
 
 with aba_hist:
     colA, colB, colC = st.columns([1, 3, 1])
