@@ -30,15 +30,15 @@ ABA_CONFIG = "config"
 FIXED_ID = "parcel"
 
 CATEGORIAS_PADRAO = [
-    {"id": "alim", "nome": "Alimentação", "cor": "#D85A30", "pct_alvo": 20, "fixo": False},
-    {"id": "transp", "nome": "Transporte", "cor": "#BA7517", "pct_alvo": 10, "fixo": False},
-    {"id": "lazer", "nome": "Lazer", "cor": "#D4537E", "pct_alvo": 5, "fixo": False},
-    {"id": "cuidado", "nome": "Cuidado pessoal", "cor": "#7F77DD", "pct_alvo": 4, "fixo": False},
-    {"id": "super", "nome": "Supermercado", "cor": "#639922", "pct_alvo": 8, "fixo": False},
-    {"id": "assina", "nome": "Assinaturas", "cor": "#888780", "pct_alvo": 2, "fixo": False},
-    {"id": "saude", "nome": "Saúde", "cor": "#1D9E75", "pct_alvo": 4, "fixo": False},
-    {"id": "outros", "nome": "Outros", "cor": "#666666", "pct_alvo": 4, "fixo": False},
-    {"id": FIXED_ID, "nome": "Parcelamentos", "cor": "#E5B800", "pct_alvo": 0, "fixo": True},
+    {"id": "alim", "nome": "Alimentação", "cor": "#D85A30", "valor_alvo": 1700, "fixo": False},
+    {"id": "transp", "nome": "Transporte", "cor": "#BA7517", "valor_alvo": 850, "fixo": False},
+    {"id": "lazer", "nome": "Lazer", "cor": "#D4537E", "valor_alvo": 425, "fixo": False},
+    {"id": "cuidado", "nome": "Cuidado pessoal", "cor": "#7F77DD", "valor_alvo": 340, "fixo": False},
+    {"id": "super", "nome": "Supermercado", "cor": "#639922", "valor_alvo": 680, "fixo": False},
+    {"id": "assina", "nome": "Assinaturas", "cor": "#888780", "valor_alvo": 170, "fixo": False},
+    {"id": "saude", "nome": "Saúde", "cor": "#1D9E75", "valor_alvo": 340, "fixo": False},
+    {"id": "outros", "nome": "Outros", "cor": "#666666", "valor_alvo": 340, "fixo": False},
+    {"id": FIXED_ID, "nome": "Parcelamentos", "cor": "#E5B800", "valor_alvo": 0, "fixo": True},
 ]
 
 LIMITE_PADRAO = 8500
@@ -77,9 +77,9 @@ def garantir_abas(sh):
 
     if ABA_CATEGORIAS not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_CATEGORIAS, rows=50, cols=5)
-        ws.append_row(["id", "nome", "cor", "pct_alvo", "fixo"])
+        ws.append_row(["id", "nome", "cor", "valor_alvo", "fixo"])
         for c in CATEGORIAS_PADRAO:
-            ws.append_row([c["id"], c["nome"], c["cor"], c["pct_alvo"], str(c["fixo"])])
+            ws.append_row([c["id"], c["nome"], c["cor"], c["valor_alvo"], str(c["fixo"])])
 
     if ABA_CONFIG not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_CONFIG, rows=10, cols=2)
@@ -95,11 +95,15 @@ def carregar_categorias():
     garantir_abas(sh)
     ws = sh.worksheet(ABA_CATEGORIAS)
     df = pd.DataFrame(ws.get_all_records())
-    if df.empty:
-        return pd.DataFrame(CATEGORIAS_PADRAO).rename(columns={"nome": "nome", "cor": "cor"})
-    df["pct_alvo"] = pd.to_numeric(df["pct_alvo"], errors="coerce").fillna(0).astype(float)
+    if df.empty or "valor_alvo" not in df.columns:
+        # Planilha ainda no esquema antigo (percentual) ou vazia — usa os padrões limpos.
+        # Abra a aba Orçamento e clique em "Salvar orçamento" uma vez para gravar
+        # esse esquema novo na planilha.
+        return pd.DataFrame(CATEGORIAS_PADRAO)
+    df["valor_alvo"] = pd.to_numeric(df["valor_alvo"], errors="coerce").fillna(0).astype(float)
     df["fixo"] = df["fixo"].astype(str).str.lower().eq("true")
     return df
+
 
 
 @st.cache_data(ttl=3600)
@@ -161,9 +165,9 @@ def salvar_configuracoes(limite, df_categorias):
 
     ws_cat = sh.worksheet(ABA_CATEGORIAS)
     ws_cat.clear()
-    linhas = [["id", "nome", "cor", "pct_alvo", "fixo"]]
+    linhas = [["id", "nome", "cor", "valor_alvo", "fixo"]]
     for _, r in df_categorias.iterrows():
-        linhas.append([r["id"], r["nome"], r["cor"], r["pct_alvo"], str(r["fixo"])])
+        linhas.append([r["id"], r["nome"], r["cor"], r["valor_alvo"], str(r["fixo"])])
     ws_cat.update(linhas)
 
     st.cache_data.clear()
@@ -207,8 +211,9 @@ def filtrar_mes(df, ano, mes):
     return df[(pd.to_datetime(df["data"]).dt.year == ano) & (pd.to_datetime(df["data"]).dt.month == mes)]
 
 
-def orcamento_categoria(row, limite):
-    return limite * (row["pct_alvo"] / 100)
+def orcamento_categoria(row, limite=None):
+    """O valor alvo já é salvo em R$ direto — não há mais round-trip via percentual."""
+    return row["valor_alvo"]
 
 
 # ───────────────────────── ESTADO DE NAVEGAÇÃO DE MÊS ─────────────────────────
@@ -460,13 +465,15 @@ with aba_orc:
                 st.error("Digite o nome da categoria.")
             else:
                 novo_valor = parse_valor(novo_valor_txt)
-                if limite_novo > 0 and (soma + novo_valor) > limite_novo:
+                if novo_valor > 1_000_000:
+                    st.error("Valor muito alto — confira se não digitou zeros a mais.")
+                elif limite_novo > 0 and (soma + novo_valor) > limite_novo:
                     st.error("Soma ultrapassaria o limite.")
                 else:
                     novo_id = "cat_" + str(int(datetime.now().timestamp()))
                     nova_linha = pd.DataFrame([{
                         "id": novo_id, "nome": novo_nome.strip(), "cor": "#888780",
-                        "pct_alvo": (novo_valor / limite_novo * 100) if limite_novo > 0 else 0,
+                        "valor_alvo": novo_valor,
                         "fixo": False,
                     }])
                     df_final = pd.concat([df_cat_edit, nova_linha], ignore_index=True)
@@ -481,11 +488,13 @@ with aba_orc:
         if st.button("Salvar orçamento", use_container_width=True):
             if limite_novo <= 0:
                 st.error("Informe um limite mensal válido antes de salvar.")
+            elif any(v > 1_000_000 for v in valores_editados.values()):
+                st.error("Algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
             elif soma > limite_novo:
                 st.error("Soma ultrapassa o limite.")
             else:
-                df_cat_edit.loc[df_cat_edit["fixo"] == False, "pct_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
-                    lambda i: round(valores_editados[i] / limite_novo * 100, 4)
+                df_cat_edit.loc[df_cat_edit["fixo"] == False, "valor_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
+                    lambda i: valores_editados[i]
                 )
                 salvar_configuracoes(limite_novo, df_cat_edit)
                 st.session_state["orc_versao"] += 1
