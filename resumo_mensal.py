@@ -22,6 +22,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 
 import gspread
+from gspread.utils import ValueRenderOption
 import pandas as pd
 from google.oauth2.service_account import Credentials
 from reportlab.lib import colors
@@ -49,16 +50,16 @@ def get_client():
 def carregar_dados():
     sh = get_client().open_by_key(os.environ["SPREADSHEET_ID"])
 
-    df_lanc = pd.DataFrame(sh.worksheet("lancamentos").get_all_records())
+    df_lanc = pd.DataFrame(sh.worksheet("lancamentos").get_all_records(value_render_option=ValueRenderOption.unformatted))
     if not df_lanc.empty:
         df_lanc["valor"] = pd.to_numeric(df_lanc["valor"], errors="coerce").fillna(0)
         df_lanc["data"] = pd.to_datetime(df_lanc["data"]).dt.date
 
-    df_cat = pd.DataFrame(sh.worksheet("categorias").get_all_records())
+    df_cat = pd.DataFrame(sh.worksheet("categorias").get_all_records(value_render_option=ValueRenderOption.unformatted))
     df_cat["valor_alvo"] = pd.to_numeric(df_cat["valor_alvo"], errors="coerce").fillna(0)
     df_cat["fixo"] = df_cat["fixo"].astype(str).str.lower().eq("true")
 
-    df_cfg = pd.DataFrame(sh.worksheet("config").get_all_records())
+    df_cfg = pd.DataFrame(sh.worksheet("config").get_all_records(value_render_option=ValueRenderOption.unformatted))
     limite = 0.0
     linha = df_cfg[df_cfg["chave"] == "limite_mensal"]
     if not linha.empty:
