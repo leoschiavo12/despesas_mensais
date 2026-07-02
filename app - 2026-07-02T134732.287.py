@@ -236,8 +236,6 @@ def mudar_mes(delta):
 
 # ───────────────────────── APP ─────────────────────────
 
-st.title("Controle de Fatura")
-
 df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
@@ -419,7 +417,12 @@ with aba_hist:
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
 with aba_orc:
-    limite_txt = st.text_input("Limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","))
+    if "orc_versao" not in st.session_state:
+        st.session_state["orc_versao"] = 0
+    versao = st.session_state["orc_versao"]
+
+    limite_txt = st.text_input("Limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
+                                key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
     st.markdown("##### Categorias")
@@ -434,7 +437,7 @@ with aba_orc:
             st.markdown(f"{c['nome']}")
         with col2:
             v_txt = st.text_input("valor", value=f"{orcamento_atual:.2f}".replace(".", ","),
-                                   key=f"orc_{c['id']}", label_visibility="collapsed")
+                                   key=f"orc_{c['id']}_{versao}", label_visibility="collapsed")
         with col3:
             v = parse_valor(v_txt)
             pct_calc = (v / limite_novo * 100) if limite_novo > 0 else 0
@@ -468,20 +471,24 @@ with aba_orc:
                     }])
                     df_final = pd.concat([df_cat_edit, nova_linha], ignore_index=True)
                     salvar_configuracoes(limite_novo, df_final)
+                    st.session_state["orc_versao"] += 1
                     st.success(f"'{novo_nome}' adicionada.")
                     st.rerun(scope="app")
 
     st.markdown("---")
     col_save, col_del = st.columns(2)
     with col_save:
-        if st.button("💾 Salvar orçamento", use_container_width=True):
-            if limite_novo > 0 and soma > limite_novo:
+        if st.button("Salvar orçamento", use_container_width=True):
+            if limite_novo <= 0:
+                st.error("Informe um limite mensal válido antes de salvar.")
+            elif soma > limite_novo:
                 st.error("Soma ultrapassa o limite.")
             else:
                 df_cat_edit.loc[df_cat_edit["fixo"] == False, "pct_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
-                    lambda i: (valores_editados[i] / limite_novo * 100) if limite_novo > 0 else 0
+                    lambda i: round(valores_editados[i] / limite_novo * 100, 4)
                 )
                 salvar_configuracoes(limite_novo, df_cat_edit)
+                st.session_state["orc_versao"] += 1
                 st.success("Orçamento salvo!")
                 st.rerun(scope="app")
     with col_del:
