@@ -21,7 +21,7 @@ import plotly.graph_objects as go
 
 # ───────────────────────── CONFIG ─────────────────────────
 
-SPREADSHEET_ID = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
+SPREADSHEET_ID = "COLE_AQUI_O_ID_DA_PLANILHA_NOVA"
 
 ABA_LANCAMENTOS = "lancamentos"
 ABA_CATEGORIAS = "categorias"
@@ -43,7 +43,7 @@ CATEGORIAS_PADRAO = [
 
 LIMITE_PADRAO = 8500
 
-st.set_page_config(page_title="Controle de Fatura", page_icon="💳", layout="centered")
+st.set_page_config(page_title="Controle de Fatura", layout="centered")
 
 # ───────────────────────── CLIENTE GOOGLE SHEETS ─────────────────────────
 
@@ -97,7 +97,7 @@ def carregar_categorias():
     df = pd.DataFrame(ws.get_all_records())
     if df.empty:
         return pd.DataFrame(CATEGORIAS_PADRAO).rename(columns={"nome": "nome", "cor": "cor"})
-    df["pct_alvo"] = pd.to_numeric(df["pct_alvo"], errors="coerce").fillna(0)
+    df["pct_alvo"] = pd.to_numeric(df["pct_alvo"], errors="coerce").fillna(0).astype(float)
     df["fixo"] = df["fixo"].astype(str).str.lower().eq("true")
     return df
 
@@ -236,14 +236,14 @@ def mudar_mes(delta):
 
 # ───────────────────────── APP ─────────────────────────
 
-st.title("💳 Controle de Fatura")
+st.title("Controle de Fatura")
 
 df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
 aba_lancar, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["➕ Lançar", "📊 Dashboard", "📜 Histórico", "⚙️ Orçamento"]
+    ["Lançar", "Dashboard", "Histórico", "Orçamento"]
 )
 
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
@@ -431,7 +431,7 @@ with aba_orc:
         orcamento_atual = orcamento_categoria(c, limite_mensal)
         col1, col2, col3 = st.columns([3, 2, 1])
         with col1:
-            st.markdown(f"🔵 {c['nome']}")
+            st.markdown(f"{c['nome']}")
         with col2:
             v_txt = st.text_input("valor", value=f"{orcamento_atual:.2f}".replace(".", ","),
                                    key=f"orc_{c['id']}", label_visibility="collapsed")
