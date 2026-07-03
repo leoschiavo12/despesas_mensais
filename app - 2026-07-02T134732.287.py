@@ -406,15 +406,17 @@ with aba_hist:
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for _, r in df_mes_ordenado.iterrows():
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
-            col1, col2, col3 = st.columns([5, 2, 1])
+            col1, col2 = st.columns([5, 2])
             with col1:
                 st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col2:
-                st.markdown(f"<div style='text-align:right;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
-            with col3:
-                if st.button("✕", key=f"del_{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"):
-                    excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
-                    st.rerun(scope="app")
+                subval, subdel = st.columns([3, 1])
+                with subval:
+                    st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
+                with subdel:
+                    if st.button("✕", key=f"del_{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"):
+                        excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
+                        st.rerun(scope="app")
 
         csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
         st.download_button(
@@ -431,9 +433,9 @@ with aba_orc:
         st.session_state["orc_versao"] = 0
     versao = st.session_state["orc_versao"]
 
-    col_limite, _ = st.columns([1, 2])
+    col_limite, _ = st.columns([1, 3])
     with col_limite:
-        limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
+        limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.0f}",
                                     key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
@@ -444,11 +446,11 @@ with aba_orc:
     valores_editados = {}
     for _, c in df_cat_edit[df_cat_edit["fixo"] == False].iterrows():
         orcamento_atual = orcamento_categoria(c, limite_mensal)
-        col1, col2, col3 = st.columns([4, 1.2, 1])
+        col1, col2, col3 = st.columns([5, 0.8, 0.9])
         with col1:
             st.markdown(f"{c['nome'].lower()}")
         with col2:
-            v_txt = st.text_input("valor", value=f"{orcamento_atual:.2f}".replace(".", ","),
+            v_txt = st.text_input("valor", value=f"{orcamento_atual:.0f}",
                                    key=f"orc_{c['id']}_{versao}", label_visibility="collapsed")
         with col3:
             v = parse_valor(v_txt)
@@ -465,7 +467,7 @@ with aba_orc:
         st.caption(f"alocado: {fmt_pct(pct_usado)} · disponível: {formatar_brl(max(0, limite_novo - soma))}")
 
     with st.expander("+ nova categoria"):
-        col_nome, col_val = st.columns([2, 1])
+        col_nome, col_val = st.columns([3, 1])
         with col_nome:
             novo_nome = st.text_input("nome da categoria", key="novo_nome")
         with col_val:
