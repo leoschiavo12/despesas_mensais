@@ -240,6 +240,20 @@ def mudar_mes(delta):
         st.session_state["mes_ref"] = candidato
 
 
+def render_nav_mes(prefixo):
+    """Navegador de mês compacto e centralizado (botões colados ao label, não nas bordas)."""
+    _, colA, colB, colC, _ = st.columns([6, 1, 3, 1, 6])
+    with colA:
+        st.button("‹", on_click=mudar_mes, args=(-1,), key=f"{prefixo}_prev", use_container_width=True)
+    with colB:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:500;padding-top:0.4rem;'>{mes_label(st.session_state['mes_ref'])}</div>",
+            unsafe_allow_html=True,
+        )
+    with colC:
+        st.button("›", on_click=mudar_mes, args=(1,), key=f"{prefixo}_next", use_container_width=True)
+
+
 # ───────────────────────── APP ─────────────────────────
 
 df_cat = carregar_categorias()
@@ -319,13 +333,7 @@ with aba_lancar:
 # ───────────────────────── ABA: DASHBOARD ─────────────────────────
 
 with aba_dash:
-    colA, colB, colC = st.columns([1, 3, 1])
-    with colA:
-        st.button("‹", on_click=mudar_mes, args=(-1,), key="dash_prev")
-    with colB:
-        st.markdown(f"<div style='text-align:center;font-weight:500;'>{mes_label(st.session_state['mes_ref'])}</div>", unsafe_allow_html=True)
-    with colC:
-        st.button("›", on_click=mudar_mes, args=(1,), key="dash_next")
+    render_nav_mes("dash")
 
     ref = st.session_state["mes_ref"]
     df_lanc = carregar_lancamentos()
@@ -334,10 +342,20 @@ with aba_dash:
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
     gasto_outros = max(0, total_gasto - gasto_parcel)
-    limite_efetivo = limite_mensal + gasto_parcel
-    disponivel = limite_efetivo - total_gasto
+    limite_efetivo = limite_mensal - gasto_parcel
+    disponivel = limite_efetivo - gasto_outros
 
-    c1, c2 = st.columns(2)
+    if gasto_parcel > 0:
+        st.caption(
+            f"Limite disponível para despesas: {formatar_brl(limite_efetivo)} "
+            f"({formatar_brl(limite_mensal)} − {formatar_brl(gasto_parcel)} de parcelamentos)"
+        )
+
+    if gasto_parcel > 0:
+        c1, c2, c3 = st.columns(3)
+    else:
+        c1, c2 = st.columns(2)
+        c3 = None
     with c1:
         st.metric("Despesas do mês", formatar_brl(gasto_outros))
         if limite_efetivo > 0:
@@ -348,8 +366,11 @@ with aba_dash:
             st.caption(fmt_pct(max(0, disponivel) / limite_efetivo * 100) + " restante" if limite_efetivo > 0 else "")
         else:
             st.caption("excedido")
+    if c3 is not None:
+        with c3:
+            st.metric("Parcelamentos", formatar_brl(gasto_parcel))
 
-    st.progress(min(total_gasto / limite_efetivo, 1.0) if limite_efetivo > 0 else 0)
+    st.progress(min(gasto_outros / limite_efetivo, 1.0) if limite_efetivo > 0 else 0)
 
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
@@ -362,12 +383,15 @@ with aba_dash:
 
     if valores:
         fig = go.Figure(data=[go.Pie(labels=labels, values=valores, hole=0.65, marker=dict(colors=cores))])
-        fig.update_layout(showlegend=True, margin=dict(t=10, b=10, l=10, r=10), height=280)
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5),
+            margin=dict(t=10, b=10, l=10, r=10), height=320,
+        )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
         st.caption("Sem lançamentos neste mês.")
 
-    st.markdown("##### Por categoria")
     if not df_mes.empty:
         gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
     else:
@@ -391,22 +415,8 @@ with aba_dash:
         )
         st.progress(pct)
 
-    gasto_parcel_dash = gasto_por_cat.get(FIXED_ID, 0)
-    if gasto_parcel_dash > 0:
-        st.markdown(
-            f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
-            f"<span>Parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_dash)}</span></div>",
-            unsafe_allow_html=True,
-        )
-
 with aba_hist:
-    colA, colB, colC = st.columns([1, 3, 1])
-    with colA:
-        st.button("‹", on_click=mudar_mes, args=(-1,), key="hist_prev")
-    with colB:
-        st.markdown(f"<div style='text-align:center;font-weight:500;'>{mes_label(st.session_state['mes_ref'])}</div>", unsafe_allow_html=True)
-    with colC:
-        st.button("›", on_click=mudar_mes, args=(1,), key="hist_next")
+    render_nav_mes("hist")
 
     ref = st.session_state["mes_ref"]
     df_lanc = carregar_lancamentos()
