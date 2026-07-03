@@ -372,11 +372,6 @@ with aba_dash:
 
     st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
-    if not df_mes.empty:
-        gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
-    else:
-        gasto_por_cat = {}
-
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_outros > 0:
@@ -396,25 +391,6 @@ with aba_dash:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
         st.caption("sem lançamentos neste mês.")
-
-    cats_view = df_cat[df_cat["id"] != FIXED_ID].copy()
-    cats_view["gasto"] = cats_view["id"].map(gasto_por_cat).fillna(0)
-    cats_view = cats_view.sort_values("gasto", ascending=False)
-    for _, c in cats_view.iterrows():
-        orcamento = orcamento_categoria(c, limite_mensal)
-        if orcamento == 0 and c["gasto"] == 0:
-            continue
-        gasto = c["gasto"]
-        pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
-        estourou = gasto > orcamento and orcamento > 0
-        st.markdown(
-            f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-            f"<span>{c['nome'].lower()}</span>"
-            f"<span style='color:{'#e05252' if estourou else '#888'};'>"
-            f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
-            unsafe_allow_html=True,
-        )
-        st.progress(pct)
 
 with aba_hist:
     render_nav_mes("hist")
@@ -455,8 +431,10 @@ with aba_orc:
         st.session_state["orc_versao"] = 0
     versao = st.session_state["orc_versao"]
 
-    limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
-                                key=f"limite_{versao}")
+    col_limite, _ = st.columns([1, 2])
+    with col_limite:
+        limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
+                                    key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
     st.markdown("##### categorias")
@@ -466,7 +444,7 @@ with aba_orc:
     valores_editados = {}
     for _, c in df_cat_edit[df_cat_edit["fixo"] == False].iterrows():
         orcamento_atual = orcamento_categoria(c, limite_mensal)
-        col1, col2, col3 = st.columns([3, 2, 1])
+        col1, col2, col3 = st.columns([4, 1.2, 1])
         with col1:
             st.markdown(f"{c['nome'].lower()}")
         with col2:
@@ -487,8 +465,11 @@ with aba_orc:
         st.caption(f"alocado: {fmt_pct(pct_usado)} · disponível: {formatar_brl(max(0, limite_novo - soma))}")
 
     with st.expander("+ nova categoria"):
-        novo_nome = st.text_input("nome da categoria", key="novo_nome")
-        novo_valor_txt = st.text_input("limite em R$", key="novo_valor")
+        col_nome, col_val = st.columns([2, 1])
+        with col_nome:
+            novo_nome = st.text_input("nome da categoria", key="novo_nome")
+        with col_val:
+            novo_valor_txt = st.text_input("limite em R$", key="novo_valor")
         if st.button("adicionar categoria"):
             if not novo_nome.strip():
                 st.error("digite o nome da categoria.")
