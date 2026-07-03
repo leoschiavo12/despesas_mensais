@@ -58,6 +58,10 @@ st.markdown("""
         min-width: 0 !important;
     }
 }
+div[data-testid="stButton"] button {
+    padding: 0.25rem 0.6rem !important;
+    min-height: 0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -428,7 +432,7 @@ with aba_hist:
             item_id = f"{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"
             pendente_key = f"pendente_del_{item_id}"
 
-            col_acao, col_desc, col_val = st.columns([1, 4, 2])
+            col_acao, col_desc, col_val = st.columns([0.6, 4, 2])
             with col_acao:
                 if st.session_state.get(pendente_key):
                     subok, subcancel = st.columns(2)
