@@ -31,20 +31,20 @@ ABA_CONFIG = "config"
 FIXED_ID = "parcel"
 
 CATEGORIAS_PADRAO = [
-    {"id": "alim", "nome": "Alimentação", "cor": "#D85A30", "valor_alvo": 1700, "fixo": False},
-    {"id": "transp", "nome": "Transporte", "cor": "#BA7517", "valor_alvo": 850, "fixo": False},
-    {"id": "lazer", "nome": "Lazer", "cor": "#D4537E", "valor_alvo": 425, "fixo": False},
-    {"id": "cuidado", "nome": "Cuidado pessoal", "cor": "#7F77DD", "valor_alvo": 340, "fixo": False},
-    {"id": "super", "nome": "Supermercado", "cor": "#639922", "valor_alvo": 680, "fixo": False},
-    {"id": "assina", "nome": "Assinaturas", "cor": "#888780", "valor_alvo": 170, "fixo": False},
-    {"id": "saude", "nome": "Saúde", "cor": "#1D9E75", "valor_alvo": 340, "fixo": False},
-    {"id": "outros", "nome": "Outros", "cor": "#666666", "valor_alvo": 340, "fixo": False},
-    {"id": FIXED_ID, "nome": "Parcelamentos", "cor": "#E5B800", "valor_alvo": 0, "fixo": True},
+    {"id": "alim", "nome": "alimentação", "cor": "#D85A30", "valor_alvo": 1700, "fixo": False},
+    {"id": "transp", "nome": "transporte", "cor": "#BA7517", "valor_alvo": 850, "fixo": False},
+    {"id": "lazer", "nome": "lazer", "cor": "#D4537E", "valor_alvo": 425, "fixo": False},
+    {"id": "cuidado", "nome": "cuidado pessoal", "cor": "#7F77DD", "valor_alvo": 340, "fixo": False},
+    {"id": "super", "nome": "supermercado", "cor": "#639922", "valor_alvo": 680, "fixo": False},
+    {"id": "assina", "nome": "assinaturas", "cor": "#888780", "valor_alvo": 170, "fixo": False},
+    {"id": "saude", "nome": "saúde", "cor": "#1D9E75", "valor_alvo": 340, "fixo": False},
+    {"id": "outros", "nome": "outros", "cor": "#666666", "valor_alvo": 340, "fixo": False},
+    {"id": FIXED_ID, "nome": "parcelamentos", "cor": "#E5B800", "valor_alvo": 0, "fixo": True},
 ]
 
 LIMITE_PADRAO = 8500
 
-st.set_page_config(page_title="Controle de Fatura", layout="centered")
+st.set_page_config(page_title="controle de fatura", layout="centered")
 
 # ───────────────────────── CLIENTE GOOGLE SHEETS ─────────────────────────
 
@@ -177,7 +177,7 @@ def salvar_configuracoes(limite, df_categorias):
 # ───────────────────────── FORMATAÇÃO ─────────────────────────
 
 def formatar_brl(valor):
-    return "R$ " + f"{valor:,.0f}".replace(",", ".")
+    return "r$ " + f"{valor:.0f}"
 
 
 def fmt_pct(p):
@@ -261,7 +261,7 @@ config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
 aba_lancar, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["Lançar", "Dashboard", "Histórico", "Orçamento"]
+    ["lançar", "dashboard", "histórico", "orçamento"]
 )
 
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
@@ -278,33 +278,33 @@ with aba_lancar:
         cats_ordenadas = cats_ordenadas.sort_values("gasto", ascending=False)
 
         opcoes_ids = [FIXED_ID] + cats_ordenadas["id"].tolist()
-        opcoes_labels = {FIXED_ID: "Parcelamentos"}
-        opcoes_labels.update(dict(zip(cats_ordenadas["id"], cats_ordenadas["nome"])))
+        opcoes_labels = {FIXED_ID: "parcelamentos"}
+        opcoes_labels.update(dict(zip(cats_ordenadas["id"], cats_ordenadas["nome"].str.lower())))
 
         with st.form("form_lancar", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
                 categoria_id = st.selectbox(
-                    "Categoria", options=opcoes_ids, format_func=lambda x: opcoes_labels[x]
+                    "categoria", options=opcoes_ids, format_func=lambda x: opcoes_labels[x]
                 )
             with col2:
-                valor_txt = st.text_input("Valor (R$)", placeholder="0,00")
-            descricao = st.text_input("Descrição (opcional)", placeholder="ex: almoço no Tabuã, Uber p/ Valinhos...")
-            data_lanc = st.date_input("Data", value=date.today(), format="DD/MM/YYYY")
-            enviado = st.form_submit_button("Registrar gasto", use_container_width=True)
+                valor_txt = st.text_input("valor (r$)", placeholder="0,00")
+            descricao = st.text_input("descrição (opcional)", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
+            data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+            enviado = st.form_submit_button("registrar gasto", use_container_width=True)
 
             if enviado:
                 valor = parse_valor(valor_txt)
                 if valor <= 0:
-                    st.error("Informe um valor válido.")
+                    st.error("informe um valor válido.")
                 else:
                     salvar_lancamento(data_lanc.isoformat(), categoria_id, descricao, valor)
-                    st.success("Registrado!")
+                    st.success("registrado!")
                     st.rerun(scope="app")
 
-        st.markdown("##### Resumo do mês")
+        st.markdown("##### resumo do mês")
         if cats_ordenadas.empty:
-            st.caption("Nenhuma categoria configurada.")
+            st.caption("nenhuma categoria configurada.")
         else:
             for _, c in cats_ordenadas.iterrows():
                 orcamento = orcamento_categoria(c, limite_mensal)
@@ -313,7 +313,7 @@ with aba_lancar:
                 estourou = gasto > orcamento and orcamento > 0
                 st.markdown(
                     f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-                    f"<span>{c['nome']}</span>"
+                    f"<span>{c['nome'].lower()}</span>"
                     f"<span style='color:{'#e05252' if estourou else '#888'};'>"
                     f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
                     unsafe_allow_html=True,
@@ -345,28 +345,39 @@ with aba_dash:
     total_fatura = total_gasto  # compras do mês + parcelamentos
     disponivel = limite_mensal - total_fatura
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Total da fatura", formatar_brl(total_fatura))
-        if limite_mensal > 0:
-            st.caption(fmt_pct(total_fatura / limite_mensal * 100) + " do limite")
-    with c2:
-        st.metric("Limite disponível", formatar_brl(abs(disponivel)))
-        if disponivel >= 0 and limite_mensal > 0:
-            st.caption(fmt_pct(disponivel / limite_mensal * 100) + " restante")
-        elif disponivel < 0:
-            st.caption("excedido")
+    cap_esq = fmt_pct(total_fatura / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
+    if disponivel >= 0 and limite_mensal > 0:
+        cap_dir = fmt_pct(disponivel / limite_mensal * 100) + " restante"
+    elif disponivel < 0:
+        cap_dir = "excedido"
+    else:
+        cap_dir = ""
+
+    st.markdown(f"""
+    <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
+        <div style='text-align:left;'>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(total_fatura)}</div>
+            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
+        </div>
+        <div style='text-align:right;'>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(abs(disponivel))}</div>
+            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_dir}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_outros > 0:
-        labels.append("Despesas"); valores.append(gasto_outros); cores.append("#D85A30")
+        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
     if gasto_parcel > 0:
-        labels.append("Parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
+        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
     if fatia_disp > 0:
-        labels.append("Disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
+        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
 
     if valores:
         fig = go.Figure(data=[go.Pie(labels=labels, values=valores, hole=0.65, marker=dict(colors=cores))])
@@ -377,7 +388,7 @@ with aba_dash:
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
-        st.caption("Sem lançamentos neste mês.")
+        st.caption("sem lançamentos neste mês.")
 
     if not df_mes.empty:
         gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
@@ -395,7 +406,7 @@ with aba_dash:
         estourou = gasto > orcamento and orcamento > 0
         st.markdown(
             f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-            f"<span>{c['nome']}</span>"
+            f"<span>{c['nome'].lower()}</span>"
             f"<span style='color:{'#e05252' if estourou else '#888'};'>"
             f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
             unsafe_allow_html=True,
@@ -410,12 +421,12 @@ with aba_hist:
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
 
     if df_mes.empty:
-        st.caption("Nenhum lançamento neste mês.")
+        st.caption("nenhum lançamento neste mês.")
     else:
         df_mes_ordenado = df_mes.sort_values("data", ascending=False)
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for _, r in df_mes_ordenado.iterrows():
-            nome_cat = mapa_nomes.get(r["categoria"], "Sem categoria")
+            nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
             col1, col2, col3 = st.columns([5, 2, 1])
             with col1:
                 st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
@@ -426,9 +437,9 @@ with aba_hist:
                     excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
                     st.rerun(scope="app")
 
-        csv = df_mes_ordenado.rename(columns={"data": "Data", "categoria": "Categoria", "descricao": "Descrição", "valor": "Valor (R$)"})
+        csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (r$)"})
         st.download_button(
-            "↓ Exportar histórico (CSV)",
+            "↓ exportar histórico (csv)",
             csv.to_csv(index=False, sep=";").encode("utf-8-sig"),
             file_name=f"fatura_{ref.year}_{ref.month:02d}.csv",
             use_container_width=True,
@@ -441,12 +452,12 @@ with aba_orc:
         st.session_state["orc_versao"] = 0
     versao = st.session_state["orc_versao"]
 
-    limite_txt = st.text_input("Limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
+    limite_txt = st.text_input("limite mensal do cartão (r$)", value=f"{limite_mensal:.2f}".replace(".", ","),
                                 key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
-    st.markdown("##### Categorias")
-    st.caption("Digite o valor em R$ — a % é calculada automaticamente")
+    st.markdown("##### categorias")
+    st.caption("digite o valor em r$ — a % é calculada automaticamente")
 
     df_cat_edit = df_cat.copy()
     valores_editados = {}
@@ -454,7 +465,7 @@ with aba_orc:
         orcamento_atual = orcamento_categoria(c, limite_mensal)
         col1, col2, col3 = st.columns([3, 2, 1])
         with col1:
-            st.markdown(f"{c['nome']}")
+            st.markdown(f"{c['nome'].lower()}")
         with col2:
             v_txt = st.text_input("valor", value=f"{orcamento_atual:.2f}".replace(".", ","),
                                    key=f"orc_{c['id']}_{versao}", label_visibility="collapsed")
@@ -468,66 +479,66 @@ with aba_orc:
     pct_usado = (soma / limite_novo * 100) if limite_novo > 0 else 0
     st.progress(min(pct_usado / 100, 1.0))
     if pct_usado > 100:
-        st.markdown(f"<span style='color:#e05252;'>Excede em {formatar_brl(soma - limite_novo)}</span>", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#e05252;'>excede em {formatar_brl(soma - limite_novo)}</span>", unsafe_allow_html=True)
     else:
-        st.caption(f"Alocado: {fmt_pct(pct_usado)} · Disponível: {formatar_brl(max(0, limite_novo - soma))}")
+        st.caption(f"alocado: {fmt_pct(pct_usado)} · disponível: {formatar_brl(max(0, limite_novo - soma))}")
 
-    with st.expander("+ Nova categoria"):
-        novo_nome = st.text_input("Nome da categoria", key="novo_nome")
-        novo_valor_txt = st.text_input("Limite em R$", key="novo_valor")
-        if st.button("Adicionar categoria"):
+    with st.expander("+ nova categoria"):
+        novo_nome = st.text_input("nome da categoria", key="novo_nome")
+        novo_valor_txt = st.text_input("limite em r$", key="novo_valor")
+        if st.button("adicionar categoria"):
             if not novo_nome.strip():
-                st.error("Digite o nome da categoria.")
+                st.error("digite o nome da categoria.")
             else:
                 novo_valor = parse_valor(novo_valor_txt)
                 if novo_valor > 1_000_000:
-                    st.error("Valor muito alto — confira se não digitou zeros a mais.")
+                    st.error("valor muito alto — confira se não digitou zeros a mais.")
                 elif limite_novo > 0 and (soma + novo_valor) > limite_novo:
-                    st.error("Soma ultrapassaria o limite.")
+                    st.error("soma ultrapassaria o limite.")
                 else:
                     novo_id = "cat_" + str(int(datetime.now().timestamp()))
                     nova_linha = pd.DataFrame([{
-                        "id": novo_id, "nome": novo_nome.strip(), "cor": "#888780",
+                        "id": novo_id, "nome": novo_nome.strip().lower(), "cor": "#888780",
                         "valor_alvo": novo_valor,
                         "fixo": False,
                     }])
                     df_final = pd.concat([df_cat_edit, nova_linha], ignore_index=True)
                     salvar_configuracoes(limite_novo, df_final)
                     st.session_state["orc_versao"] += 1
-                    st.success(f"'{novo_nome}' adicionada.")
+                    st.success(f"'{novo_nome.strip().lower()}' adicionada.")
                     st.rerun(scope="app")
 
     st.markdown("---")
     col_save, col_del = st.columns(2)
     with col_save:
-        if st.button("Salvar orçamento", use_container_width=True):
+        if st.button("salvar orçamento", use_container_width=True):
             if limite_novo <= 0:
-                st.error("Informe um limite mensal válido antes de salvar.")
+                st.error("informe um limite mensal válido antes de salvar.")
             elif any(v > 1_000_000 for v in valores_editados.values()):
-                st.error("Algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
+                st.error("algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
             elif soma > limite_novo:
-                st.error("Soma ultrapassa o limite.")
+                st.error("soma ultrapassa o limite.")
             else:
                 df_cat_edit.loc[df_cat_edit["fixo"] == False, "valor_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
                     lambda i: valores_editados[i]
                 )
                 salvar_configuracoes(limite_novo, df_cat_edit)
                 st.session_state["orc_versao"] += 1
-                st.success("Orçamento salvo!")
+                st.success("orçamento salvo!")
                 st.rerun(scope="app")
     with col_del:
-        if st.button("🗑️ Apagar todos os lançamentos", use_container_width=True):
+        if st.button("🗑️ apagar todos os lançamentos", use_container_width=True):
             st.session_state["confirmar_delete"] = True
     if st.session_state.get("confirmar_delete"):
-        st.warning("Tem certeza? Essa ação apaga TODOS os lançamentos e não pode ser desfeita.")
+        st.warning("tem certeza? essa ação apaga todos os lançamentos e não pode ser desfeita.")
         c1, c2 = st.columns(2)
-        if c1.button("Sim, apagar tudo"):
+        if c1.button("sim, apagar tudo"):
             ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
             ws.clear()
             ws.append_row(["data", "categoria", "descricao", "valor"])
             recarregar_lancamentos()
             st.session_state["confirmar_delete"] = False
             st.rerun(scope="app")
-        if c2.button("Cancelar"):
+        if c2.button("cancelar"):
             st.session_state["confirmar_delete"] = False
             st.rerun()
