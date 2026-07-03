@@ -201,9 +201,9 @@ def parse_valor(txt):
 # ───────────────────────── LÓGICA DE NEGÓCIO ─────────────────────────
 
 def mes_label(d):
-    meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
-             "agosto", "setembro", "outubro", "novembro", "dezembro"]
-    return f"{meses[d.month - 1]} de {d.year}"
+    meses = ["jan", "fev", "mar", "abr", "mai", "jun",
+             "jul", "ago", "set", "out", "nov", "dez"]
+    return f"{meses[d.month - 1]}/{d.year % 100:02d}"
 
 
 def filtrar_mes(df, ano, mes):
@@ -241,8 +241,8 @@ def mudar_mes(delta):
 
 
 def render_nav_mes(prefixo):
-    """Navegador de mês compacto e centralizado — setas sem caixa, coladas ao label."""
-    _, colA, colB, colC, _ = st.columns([6, 1, 3, 1, 6])
+    """Navegador de mês com setas nas extremidades (mesmo espírito dos cards)."""
+    colA, colB, colC = st.columns([1, 10, 1])
     with colA:
         st.button("‹", on_click=mudar_mes, args=(-1,), key=f"{prefixo}_prev",
                    use_container_width=True, type="tertiary")
@@ -376,21 +376,6 @@ with aba_dash:
         gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
     else:
         gasto_por_cat = {}
-
-    if total_fatura > 0:
-        mapa_cor = dict(zip(df_cat["id"], df_cat["cor"]))
-        mapa_nome_cat = dict(zip(df_cat["id"], df_cat["nome"]))
-        itens_ordenados = sorted(gasto_por_cat.items(), key=lambda kv: kv[1], reverse=True)
-        segmentos = "".join(
-            f"<div title='{mapa_nome_cat.get(cid, cid)}: {formatar_brl(v)}' "
-            f"style='width:{v/total_fatura*100:.2f}%;background:{mapa_cor.get(cid, '#666')};height:100%;'></div>"
-            for cid, v in itens_ordenados if v > 0
-        )
-        st.markdown(
-            f"<div style='display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:6px;'>{segmentos}</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption("despesas do mês por categoria — passe o mouse sobre cada trecho")
 
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
