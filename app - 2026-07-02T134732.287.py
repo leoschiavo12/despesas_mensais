@@ -433,7 +433,7 @@ with aba_orc:
         st.session_state["orc_versao"] = 0
     versao = st.session_state["orc_versao"]
 
-    col_limite, _ = st.columns([1, 3])
+    _, col_limite = st.columns([3, 1])
     with col_limite:
         limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.0f}",
                                     key=f"limite_{versao}")
