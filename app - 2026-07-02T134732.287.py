@@ -177,7 +177,7 @@ def salvar_configuracoes(limite, df_categorias):
 # ───────────────────────── FORMATAÇÃO ─────────────────────────
 
 def formatar_brl(valor):
-    return "r$ " + f"{valor:.0f}"
+    return "R$ " + f"{valor:.0f}"
 
 
 def fmt_pct(p):
@@ -241,17 +241,19 @@ def mudar_mes(delta):
 
 
 def render_nav_mes(prefixo):
-    """Navegador de mês compacto e centralizado (botões colados ao label, não nas bordas)."""
+    """Navegador de mês compacto e centralizado — setas sem caixa, coladas ao label."""
     _, colA, colB, colC, _ = st.columns([6, 1, 3, 1, 6])
     with colA:
-        st.button("‹", on_click=mudar_mes, args=(-1,), key=f"{prefixo}_prev", use_container_width=True)
+        st.button("‹", on_click=mudar_mes, args=(-1,), key=f"{prefixo}_prev",
+                   use_container_width=True, type="tertiary")
     with colB:
         st.markdown(
             f"<div style='text-align:center;font-weight:500;padding-top:0.4rem;'>{mes_label(st.session_state['mes_ref'])}</div>",
             unsafe_allow_html=True,
         )
     with colC:
-        st.button("›", on_click=mudar_mes, args=(1,), key=f"{prefixo}_next", use_container_width=True)
+        st.button("›", on_click=mudar_mes, args=(1,), key=f"{prefixo}_next",
+                   use_container_width=True, type="tertiary")
 
 
 # ───────────────────────── APP ─────────────────────────
@@ -288,7 +290,7 @@ with aba_lancar:
                     "categoria", options=opcoes_ids, format_func=lambda x: opcoes_labels[x]
                 )
             with col2:
-                valor_txt = st.text_input("valor (r$)", placeholder="0,00")
+                valor_txt = st.text_input("valor (R$)", placeholder="0,00")
             descricao = st.text_input("descrição (opcional)", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
             data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
             enviado = st.form_submit_button("registrar gasto", use_container_width=True)
@@ -370,6 +372,26 @@ with aba_dash:
 
     st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
+    if not df_mes.empty:
+        gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
+    else:
+        gasto_por_cat = {}
+
+    if total_fatura > 0:
+        mapa_cor = dict(zip(df_cat["id"], df_cat["cor"]))
+        mapa_nome_cat = dict(zip(df_cat["id"], df_cat["nome"]))
+        itens_ordenados = sorted(gasto_por_cat.items(), key=lambda kv: kv[1], reverse=True)
+        segmentos = "".join(
+            f"<div title='{mapa_nome_cat.get(cid, cid)}: {formatar_brl(v)}' "
+            f"style='width:{v/total_fatura*100:.2f}%;background:{mapa_cor.get(cid, '#666')};height:100%;'></div>"
+            for cid, v in itens_ordenados if v > 0
+        )
+        st.markdown(
+            f"<div style='display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:6px;'>{segmentos}</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption("despesas do mês por categoria — passe o mouse sobre cada trecho")
+
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_outros > 0:
@@ -390,10 +412,6 @@ with aba_dash:
     else:
         st.caption("sem lançamentos neste mês.")
 
-    if not df_mes.empty:
-        gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict()
-    else:
-        gasto_por_cat = {}
     cats_view = df_cat[df_cat["id"] != FIXED_ID].copy()
     cats_view["gasto"] = cats_view["id"].map(gasto_por_cat).fillna(0)
     cats_view = cats_view.sort_values("gasto", ascending=False)
@@ -437,7 +455,7 @@ with aba_hist:
                     excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
                     st.rerun(scope="app")
 
-        csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (r$)"})
+        csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
         st.download_button(
             "↓ exportar histórico (csv)",
             csv.to_csv(index=False, sep=";").encode("utf-8-sig"),
@@ -452,12 +470,12 @@ with aba_orc:
         st.session_state["orc_versao"] = 0
     versao = st.session_state["orc_versao"]
 
-    limite_txt = st.text_input("limite mensal do cartão (r$)", value=f"{limite_mensal:.2f}".replace(".", ","),
+    limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.2f}".replace(".", ","),
                                 key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
     st.markdown("##### categorias")
-    st.caption("digite o valor em r$ — a % é calculada automaticamente")
+    st.caption("digite o valor em R$ — a % é calculada automaticamente")
 
     df_cat_edit = df_cat.copy()
     valores_editados = {}
@@ -485,7 +503,7 @@ with aba_orc:
 
     with st.expander("+ nova categoria"):
         novo_nome = st.text_input("nome da categoria", key="novo_nome")
-        novo_valor_txt = st.text_input("limite em r$", key="novo_valor")
+        novo_valor_txt = st.text_input("limite em R$", key="novo_valor")
         if st.button("adicionar categoria"):
             if not novo_nome.strip():
                 st.error("digite o nome da categoria.")
