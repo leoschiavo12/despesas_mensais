@@ -342,35 +342,22 @@ with aba_dash:
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
     gasto_outros = max(0, total_gasto - gasto_parcel)
-    limite_efetivo = limite_mensal - gasto_parcel
-    disponivel = limite_efetivo - gasto_outros
+    total_fatura = total_gasto  # compras do mês + parcelamentos
+    disponivel = limite_mensal - total_fatura
 
-    if gasto_parcel > 0:
-        st.caption(
-            f"Limite disponível para despesas: {formatar_brl(limite_efetivo)} "
-            f"({formatar_brl(limite_mensal)} − {formatar_brl(gasto_parcel)} de parcelamentos)"
-        )
-
-    if gasto_parcel > 0:
-        c1, c2, c3 = st.columns(3)
-    else:
-        c1, c2 = st.columns(2)
-        c3 = None
+    c1, c2 = st.columns(2)
     with c1:
-        st.metric("Despesas do mês", formatar_brl(gasto_outros))
-        if limite_efetivo > 0:
-            st.caption(fmt_pct(gasto_outros / limite_efetivo * 100) + " do limite")
+        st.metric("Total da fatura", formatar_brl(total_fatura))
+        if limite_mensal > 0:
+            st.caption(fmt_pct(total_fatura / limite_mensal * 100) + " do limite")
     with c2:
-        st.metric("Disponível", formatar_brl(abs(disponivel)))
-        if disponivel >= 0:
-            st.caption(fmt_pct(max(0, disponivel) / limite_efetivo * 100) + " restante" if limite_efetivo > 0 else "")
-        else:
+        st.metric("Limite disponível", formatar_brl(abs(disponivel)))
+        if disponivel >= 0 and limite_mensal > 0:
+            st.caption(fmt_pct(disponivel / limite_mensal * 100) + " restante")
+        elif disponivel < 0:
             st.caption("excedido")
-    if c3 is not None:
-        with c3:
-            st.metric("Parcelamentos", formatar_brl(gasto_parcel))
 
-    st.progress(min(gasto_outros / limite_efetivo, 1.0) if limite_efetivo > 0 else 0)
+    st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
