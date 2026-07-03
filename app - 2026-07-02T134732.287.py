@@ -46,6 +46,21 @@ LIMITE_PADRAO = 8500
 
 st.set_page_config(page_title="controle de fatura", layout="centered")
 
+# Impede que st.columns empilhe verticalmente em telas estreitas (celular).
+# Sem isso, qualquer layout lado a lado (setas de navegação, valor + botão de
+# excluir, etc.) quebra em blocos empilhados no mobile.
+st.markdown("""
+<style>
+@media (max-width: 640px) {
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        width: auto !important;
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ───────────────────────── CLIENTE GOOGLE SHEETS ─────────────────────────
 
 @st.cache_resource
@@ -304,32 +319,6 @@ with aba_lancar:
                     st.success("registrado!")
                     st.rerun(scope="app")
 
-        st.markdown("##### resumo do mês")
-        if cats_ordenadas.empty:
-            st.caption("nenhuma categoria configurada.")
-        else:
-            for _, c in cats_ordenadas.iterrows():
-                orcamento = orcamento_categoria(c, limite_mensal)
-                gasto = c["gasto"]
-                pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
-                estourou = gasto > orcamento and orcamento > 0
-                st.markdown(
-                    f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-                    f"<span>{c['nome'].lower()}</span>"
-                    f"<span style='color:{'#e05252' if estourou else '#888'};'>"
-                    f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
-                    unsafe_allow_html=True,
-                )
-                st.progress(pct)
-
-            gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
-            if gasto_parcel_mes > 0:
-                st.markdown(
-                    f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
-                    f"<span>Parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
-                    unsafe_allow_html=True,
-                )
-
     form_lancamento()
 
 # ───────────────────────── ABA: DASHBOARD ─────────────────────────
@@ -392,6 +381,36 @@ with aba_dash:
     else:
         st.caption("sem lançamentos neste mês.")
 
+    gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
+    cats_ordenadas = df_cat[df_cat["id"] != FIXED_ID].copy()
+    cats_ordenadas["gasto"] = cats_ordenadas["id"].map(gasto_por_cat).fillna(0)
+    cats_ordenadas = cats_ordenadas.sort_values("gasto", ascending=False)
+
+    if cats_ordenadas.empty:
+        st.caption("nenhuma categoria configurada.")
+    else:
+        for _, c in cats_ordenadas.iterrows():
+            orcamento = orcamento_categoria(c, limite_mensal)
+            gasto = c["gasto"]
+            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
+            estourou = gasto > orcamento and orcamento > 0
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
+                f"<span>{c['nome'].lower()}</span>"
+                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
+                f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.progress(pct)
+
+        gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
+        if gasto_parcel_mes > 0:
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+                f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
+                unsafe_allow_html=True,
+            )
+
 with aba_hist:
     render_nav_mes("hist")
 
@@ -406,17 +425,28 @@ with aba_hist:
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for _, r in df_mes_ordenado.iterrows():
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
+            item_id = f"{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"
+            pendente_key = f"pendente_del_{item_id}"
+
             col1, col2 = st.columns([5, 2])
             with col1:
                 st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col2:
-                subval, subdel = st.columns([3, 1])
-                with subval:
-                    st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
-                with subdel:
-                    if st.button("✕", key=f"del_{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"):
-                        excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
-                        st.rerun(scope="app")
+                if st.session_state.get(pendente_key):
+                    subok, subcancel = st.columns(2)
+                    with subok:
+                        if st.button("confirmar", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                            excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
+                            st.session_state.pop(pendente_key, None)
+                            st.rerun(scope="app")
+                    with subcancel:
+                        if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                            st.session_state.pop(pendente_key, None)
+                            st.rerun()
+                else:
+                    if st.button(f"− {formatar_brl(r['valor'])}  ✕", key=f"del_{item_id}", use_container_width=True):
+                        st.session_state[pendente_key] = True
+                        st.rerun()
 
         csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
         st.download_button(
