@@ -65,6 +65,11 @@ div[data-testid="stButton"] button {
     font-size: 0.85rem !important;
     line-height: 1 !important;
 }
+div[data-testid="stTextInput"] input,
+div[data-testid="stDateInput"] input {
+    padding: 0.35rem 0.6rem !important;
+    font-size: 0.9rem !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -405,7 +410,7 @@ with aba_lancar:
     hoje = date.today()
     df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
     render_cards_limite(df_mes_atual_lancar, limite_mensal)
-    st.caption(f"faltam {dias_ate_proximo_mes(hoje)} dia(s) para o próximo mês")
+    st.caption(f"faltam {dias_ate_proximo_mes(hoje)} dias para o fechamento da fatura")
     st.markdown("---")
 
     @st.fragment
@@ -428,16 +433,21 @@ with aba_lancar:
             index_default = 0
 
         with st.form("form_lancar", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
+            col_cat, col_desc = st.columns([1, 1.4])
+            with col_cat:
                 categoria_id = st.selectbox(
                     "categoria", options=opcoes_ids, index=index_default,
                     format_func=lambda x: opcoes_labels[x]
                 )
-            with col2:
+            with col_desc:
+                descricao = st.text_input("descrição (opcional)", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
+
+            col_val, col_data = st.columns([1, 1])
+            with col_val:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
-            descricao = st.text_input("descrição (opcional)", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
-            data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+            with col_data:
+                data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+
             enviado = st.form_submit_button("registrar gasto", use_container_width=True)
 
             if enviado:
