@@ -392,10 +392,12 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
         labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
 
     if valores:
+        soma_valores = sum(valores)
+        percentuais = [fmt_pct(v / soma_valores * 100) for v in valores]
         fig = go.Figure(data=[go.Pie(
             labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
             sort=False, direction="clockwise", rotation=0,
-            textinfo="label+percent", textposition="outside",
+            text=percentuais, texttemplate="%{label}<br>%{text}", textposition="outside",
             textfont=dict(size=13, color="#e8e8e6"),
             automargin=True,
         )])
