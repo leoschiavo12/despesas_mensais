@@ -205,8 +205,7 @@ def formatar_brl(valor):
 def fmt_pct(p):
     if p == 0:
         return "0%"
-    texto = f"{p:.2f}".rstrip("0").rstrip(".")
-    return f"{texto}%"
+    return f"{p:.1f}".replace(".", ",") + "%"
 
 
 def parse_valor(txt):
@@ -284,9 +283,9 @@ df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
-def render_resumo_financeiro(df_mes, limite_mensal, df_cat):
-    """Cards de total/limite, barra de progresso, rosca e barras por categoria.
-    Usado tanto na aba Lançar (sempre mês atual) quanto na aba Dashboard (mês navegado)."""
+def render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chave="default"):
+    """Cards de total/limite + barra de progresso. Se detalhado=True, mostra também
+    a rosca e as barras por categoria (usado só no Dashboard, não em Lançar)."""
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
     gasto_outros = max(0, total_gasto - gasto_parcel)
@@ -304,19 +303,22 @@ def render_resumo_financeiro(df_mes, limite_mensal, df_cat):
     st.markdown(f"""
     <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
         <div style='text-align:left;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(total_fatura)}</div>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura (R$)</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_fatura:.0f}</div>
             <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
         </div>
         <div style='text-align:right;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(abs(disponivel))}</div>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível (R$)</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{abs(disponivel):.0f}</div>
             <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_dir}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
+
+    if not detalhado:
+        return
 
     # Ordem FIXA (não reordena conforme os valores mudam): parcelamentos sempre
     # primeiro (2º quadrante), depois despesas, depois disponível — sentido
@@ -340,7 +342,7 @@ def render_resumo_financeiro(df_mes, limite_mensal, df_cat):
             legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5),
             margin=dict(t=10, b=10, l=10, r=10), height=320,
         )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
     else:
         st.caption("sem lançamentos neste mês.")
 
@@ -422,7 +424,7 @@ with aba_lancar:
     st.markdown("---")
     hoje = date.today()
     df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
-    render_resumo_financeiro(df_mes_atual_lancar, limite_mensal, df_cat)
+    render_resumo_financeiro(df_mes_atual_lancar, limite_mensal, df_cat, detalhado=False, chave="lancar")
 
 with aba_dash:
     render_nav_mes("dash")
@@ -431,7 +433,7 @@ with aba_dash:
     df_lanc = carregar_lancamentos()
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
 
-    render_resumo_financeiro(df_mes, limite_mensal, df_cat)
+    render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chave="dash")
 
 with aba_hist:
     render_nav_mes("hist")
