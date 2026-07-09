@@ -284,6 +284,97 @@ df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
+def render_resumo_financeiro(df_mes, limite_mensal, df_cat):
+    """Cards de total/limite, barra de progresso, rosca e barras por categoria.
+    Usado tanto na aba Lançar (sempre mês atual) quanto na aba Dashboard (mês navegado)."""
+    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
+    gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
+    gasto_outros = max(0, total_gasto - gasto_parcel)
+    total_fatura = total_gasto  # compras do mês + parcelamentos
+    disponivel = limite_mensal - total_fatura
+
+    cap_esq = fmt_pct(total_fatura / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
+    if disponivel >= 0 and limite_mensal > 0:
+        cap_dir = fmt_pct(disponivel / limite_mensal * 100) + " restante"
+    elif disponivel < 0:
+        cap_dir = "excedido"
+    else:
+        cap_dir = ""
+
+    st.markdown(f"""
+    <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
+        <div style='text-align:left;'>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(total_fatura)}</div>
+            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
+        </div>
+        <div style='text-align:right;'>
+            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(abs(disponivel))}</div>
+            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_dir}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
+
+    # Ordem FIXA (não reordena conforme os valores mudam): parcelamentos sempre
+    # primeiro (2º quadrante), depois despesas, depois disponível — sentido
+    # anti-horário a partir das 12h. sort=False é essencial pra manter essa ordem.
+    fatia_disp = max(0, disponivel)
+    labels, valores, cores = [], [], []
+    if gasto_parcel > 0:
+        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
+    if gasto_outros > 0:
+        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
+    if fatia_disp > 0:
+        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
+
+    if valores:
+        fig = go.Figure(data=[go.Pie(
+            labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
+            sort=False, direction="counterclockwise", rotation=90,
+        )])
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5),
+            margin=dict(t=10, b=10, l=10, r=10), height=320,
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.caption("sem lançamentos neste mês.")
+
+    gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
+    cats_ordenadas = df_cat[df_cat["id"] != FIXED_ID].copy()
+    cats_ordenadas["gasto"] = cats_ordenadas["id"].map(gasto_por_cat).fillna(0)
+    cats_ordenadas = cats_ordenadas.sort_values("gasto", ascending=False)
+
+    if cats_ordenadas.empty:
+        st.caption("nenhuma categoria configurada.")
+    else:
+        for _, c in cats_ordenadas.iterrows():
+            orcamento = orcamento_categoria(c, limite_mensal)
+            gasto = c["gasto"]
+            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
+            estourou = gasto > orcamento and orcamento > 0
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
+                f"<span>{c['nome'].lower()}</span>"
+                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
+                f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.progress(pct)
+
+        gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
+        if gasto_parcel_mes > 0:
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+                f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+
 aba_lancar, aba_dash, aba_hist, aba_orc = st.tabs(
     ["lançar", "dashboard", "histórico", "orçamento"]
 )
@@ -328,7 +419,10 @@ with aba_lancar:
 
     form_lancamento()
 
-# ───────────────────────── ABA: DASHBOARD ─────────────────────────
+    st.markdown("---")
+    hoje = date.today()
+    df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
+    render_resumo_financeiro(df_mes_atual_lancar, limite_mensal, df_cat)
 
 with aba_dash:
     render_nav_mes("dash")
@@ -337,86 +431,7 @@ with aba_dash:
     df_lanc = carregar_lancamentos()
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
 
-    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
-    gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
-    gasto_outros = max(0, total_gasto - gasto_parcel)
-    total_fatura = total_gasto  # compras do mês + parcelamentos
-    disponivel = limite_mensal - total_fatura
-
-    cap_esq = fmt_pct(total_fatura / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
-    if disponivel >= 0 and limite_mensal > 0:
-        cap_dir = fmt_pct(disponivel / limite_mensal * 100) + " restante"
-    elif disponivel < 0:
-        cap_dir = "excedido"
-    else:
-        cap_dir = ""
-
-    st.markdown(f"""
-    <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
-        <div style='text-align:left;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(total_fatura)}</div>
-            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
-        </div>
-        <div style='text-align:right;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{formatar_brl(abs(disponivel))}</div>
-            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_dir}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
-
-    fatia_disp = max(0, disponivel)
-    labels, valores, cores = [], [], []
-    if gasto_outros > 0:
-        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
-    if gasto_parcel > 0:
-        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
-    if fatia_disp > 0:
-        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
-
-    if valores:
-        fig = go.Figure(data=[go.Pie(labels=labels, values=valores, hole=0.65, marker=dict(colors=cores))])
-        fig.update_layout(
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5),
-            margin=dict(t=10, b=10, l=10, r=10), height=320,
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    else:
-        st.caption("sem lançamentos neste mês.")
-
-    gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
-    cats_ordenadas = df_cat[df_cat["id"] != FIXED_ID].copy()
-    cats_ordenadas["gasto"] = cats_ordenadas["id"].map(gasto_por_cat).fillna(0)
-    cats_ordenadas = cats_ordenadas.sort_values("gasto", ascending=False)
-
-    if cats_ordenadas.empty:
-        st.caption("nenhuma categoria configurada.")
-    else:
-        for _, c in cats_ordenadas.iterrows():
-            orcamento = orcamento_categoria(c, limite_mensal)
-            gasto = c["gasto"]
-            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
-            estourou = gasto > orcamento and orcamento > 0
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-                f"<span>{c['nome'].lower()}</span>"
-                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
-                f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
-                unsafe_allow_html=True,
-            )
-            st.progress(pct)
-
-        gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
-        if gasto_parcel_mes > 0:
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
-                f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
-                unsafe_allow_html=True,
-            )
+    render_resumo_financeiro(df_mes, limite_mensal, df_cat)
 
 with aba_hist:
     render_nav_mes("hist")
