@@ -363,24 +363,31 @@ def render_cards_limite(df_mes, limite_mensal):
     st.progress(min(total_gasto / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
 
-def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
+def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
     """Gráfico de rosca + barras de progresso por categoria."""
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
     gasto_outros = max(0, total_gasto - gasto_parcel)
     disponivel = limite_mensal - total_gasto
 
+    meses_extenso = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                      "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+    nome_mes_atual = meses_extenso[mes_ref.month - 1]
+
     # Ordem FIXA (não reordena conforme os valores mudam). O Plotly sempre desenha
     # a 1ª fatia da lista começando às 12h e indo para a direita, não importa o
     # "direction" — confirmado empiricamente. parcelamentos precisa ser a ÚLTIMA
     # fatia (termina às 12h, ocupando o 2º quadrante); disponível vem logo antes
     # dela (fica adjacente, no 3º quadrante); despesas fica com o restante.
+    # A legenda é desenhada à parte (showlegend=False), na ordem pedida
+    # (parcelamentos, mês atual, disponível), pois no Plotly a legenda segue a
+    # ordem das fatias — desenhando a nossa própria, as duas ordens ficam livres.
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if fatia_disp > 0:
         labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
     if gasto_outros > 0:
-        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
+        labels.append(nome_mes_atual); valores.append(gasto_outros); cores.append("#D85A30")
     if gasto_parcel > 0:
         labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
 
@@ -390,11 +397,25 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
             sort=False, direction="clockwise", rotation=0,
         )])
         fig.update_layout(
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5),
-            margin=dict(t=10, b=10, l=10, r=10), height=320,
+            showlegend=False,
+            margin=dict(t=10, b=10, l=10, r=10), height=280,
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
+
+        itens_legenda = []
+        if gasto_parcel > 0:
+            itens_legenda.append(("#E5B800", "parcelamentos"))
+        if gasto_outros > 0:
+            itens_legenda.append(("#D85A30", nome_mes_atual))
+        if fatia_disp > 0:
+            itens_legenda.append(("#2a2a2a", "disponível"))
+        legenda_html = "".join(
+            f"<span style='display:inline-flex;align-items:center;gap:6px;margin-right:18px;'>"
+            f"<span style='width:10px;height:10px;border-radius:2px;background:{cor};display:inline-block;'></span>"
+            f"<span style='font-size:14px;'>{nome}</span></span>"
+            for cor, nome in itens_legenda
+        )
+        st.markdown(f"<div style='text-align:center;margin-top:4px;'>{legenda_html}</div>", unsafe_allow_html=True)
     else:
         st.caption("sem lançamentos neste mês.")
 
@@ -496,7 +517,7 @@ with aba_dash:
     df_lanc = carregar_lancamentos()
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
 
-    render_grafico_categorias(df_mes, limite_mensal, df_cat, chave="dash")
+    render_grafico_categorias(df_mes, limite_mensal, df_cat, chave="dash", mes_ref=ref)
 
 with aba_hist:
     render_nav_mes("hist")
