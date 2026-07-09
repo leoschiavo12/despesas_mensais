@@ -368,17 +368,16 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
     disponivel = limite_mensal - total_gasto
 
     # Ordem FIXA (não reordena conforme os valores mudam). O Plotly sempre desenha
-    # a 1ª fatia da lista começando às 12h e indo para a direita (1º quadrante),
-    # não importa o "direction" — confirmado empiricamente. Então, pra parcelamentos
-    # cair no 2º quadrante (que fica "antes" das 12h, lendo a partir da esquerda),
-    # ela precisa ser a ÚLTIMA fatia da lista: despesas → disponível → parcelamentos.
-    # Assim parcelamentos termina exatamente às 12h, ocupando o 2º quadrante.
+    # a 1ª fatia da lista começando às 12h e indo para a direita, não importa o
+    # "direction" — confirmado empiricamente. parcelamentos precisa ser a ÚLTIMA
+    # fatia (termina às 12h, ocupando o 2º quadrante); disponível vem logo antes
+    # dela (fica adjacente, no 3º quadrante); despesas fica com o restante.
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
-    if gasto_outros > 0:
-        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
     if fatia_disp > 0:
         labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
+    if gasto_outros > 0:
+        labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
     if gasto_parcel > 0:
         labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
 
