@@ -395,27 +395,15 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
         fig = go.Figure(data=[go.Pie(
             labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
             sort=False, direction="clockwise", rotation=0,
+            textinfo="label+percent", textposition="outside",
+            textfont=dict(size=13, color="#e8e8e6"),
+            automargin=True,
         )])
         fig.update_layout(
             showlegend=False,
-            margin=dict(t=10, b=10, l=10, r=10), height=280,
+            margin=dict(t=50, b=50, l=70, r=70), height=380,
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
-
-        itens_legenda = []
-        if gasto_parcel > 0:
-            itens_legenda.append(("#E5B800", "parcelamentos"))
-        if gasto_outros > 0:
-            itens_legenda.append(("#D85A30", nome_mes_atual))
-        if fatia_disp > 0:
-            itens_legenda.append(("#2a2a2a", "disponível"))
-        legenda_html = "".join(
-            f"<span style='display:inline-flex;align-items:center;gap:6px;margin-right:18px;'>"
-            f"<span style='width:10px;height:10px;border-radius:2px;background:{cor};display:inline-block;'></span>"
-            f"<span style='font-size:14px;'>{nome}</span></span>"
-            for cor, nome in itens_legenda
-        )
-        st.markdown(f"<div style='text-align:center;margin-top:4px;'>{legenda_html}</div>", unsafe_allow_html=True)
     else:
         st.caption("sem lançamentos neste mês.")
 
