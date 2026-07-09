@@ -59,8 +59,11 @@ st.markdown("""
     }
 }
 div[data-testid="stButton"] button {
-    padding: 0.25rem 0.6rem !important;
-    min-height: 0 !important;
+    padding: 0.1rem 0.5rem !important;
+    min-height: 1.6rem !important;
+    height: 1.6rem !important;
+    font-size: 0.85rem !important;
+    line-height: 1 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -427,12 +430,12 @@ with aba_hist:
     else:
         df_mes_ordenado = df_mes.sort_values("data", ascending=False)
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
-        for _, r in df_mes_ordenado.iterrows():
+        for idx_row, (_, r) in enumerate(df_mes_ordenado.iterrows()):
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
-            item_id = f"{r['data']}_{r['categoria']}_{r['descricao']}_{r['valor']}"
+            item_id = f"{idx_row}_{r['data']}_{r['categoria']}_{r['valor']}"
             pendente_key = f"pendente_del_{item_id}"
 
-            col_acao, col_desc, col_val = st.columns([0.6, 4, 2])
+            col_acao, col_desc, col_val = st.columns([0.4, 4, 2])
             with col_acao:
                 if st.session_state.get(pendente_key):
                     subok, subcancel = st.columns(2)
