@@ -60,15 +60,22 @@ st.markdown("""
 }
 div[data-testid="stButton"] button {
     padding: 0.1rem 0.5rem !important;
-    min-height: 1.6rem !important;
-    height: 1.6rem !important;
+    min-height: 1.9rem !important;
+    height: 1.9rem !important;
     font-size: 0.85rem !important;
     line-height: 1 !important;
 }
 div[data-testid="stTextInput"] input,
-div[data-testid="stDateInput"] input {
-    padding: 0.35rem 0.6rem !important;
-    font-size: 0.9rem !important;
+div[data-testid="stDateInput"] input,
+div[data-testid="stNumberInput"] input,
+div[data-baseweb="select"] > div {
+    min-height: 1.9rem !important;
+    height: 1.9rem !important;
+    padding: 0.25rem 0.6rem !important;
+    font-size: 0.85rem !important;
+}
+div[data-testid="stWidgetLabel"] p {
+    font-size: 0.8rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -304,7 +311,7 @@ config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
 def render_cards_limite(df_mes, limite_mensal):
-    """Cards de total da fatura / limite disponível + barra de progresso."""
+    """Cards de total da fatura / limite disponível + texto central de dias + barra de progresso."""
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     disponivel = limite_mensal - total_gasto
 
@@ -316,13 +323,19 @@ def render_cards_limite(df_mes, limite_mensal):
     else:
         cap_dir = ""
 
+    hoje = date.today()
+    prox_mes_num = hoje.month + 1 if hoje.month < 12 else 1
+    prox_ano = hoje.year if hoje.month < 12 else hoje.year + 1
+    texto_dias = f"faltam {dias_ate_proximo_mes(hoje)} dias para {mes_label(date(prox_ano, prox_mes_num, 1))}"
+
     st.markdown(f"""
-    <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
+    <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;'>
         <div style='text-align:left;'>
             <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura (R$)</div>
             <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>
             <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
         </div>
+        <div style='text-align:center;color:#888;font-size:12px;flex:1;'>{texto_dias}</div>
         <div style='text-align:right;'>
             <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível (R$)</div>
             <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{abs(disponivel):.0f}</div>
@@ -410,7 +423,6 @@ with aba_lancar:
     hoje = date.today()
     df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
     render_cards_limite(df_mes_atual_lancar, limite_mensal)
-    st.caption(f"faltam {dias_ate_proximo_mes(hoje)} dias para o fechamento da fatura")
     st.markdown("---")
 
     @st.fragment
