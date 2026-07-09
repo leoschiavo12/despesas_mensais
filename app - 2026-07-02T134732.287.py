@@ -55,6 +55,9 @@ st.markdown("""
     div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
     }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        min-width: 0 !important;
+    }
 }
 div[data-testid="stButton"] button {
     padding: 0.1rem 0.5rem !important;
