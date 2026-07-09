@@ -17,7 +17,7 @@ import pandas as pd
 import gspread
 from gspread.utils import ValueRenderOption
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import plotly.graph_objects as go
 
 # ───────────────────────── CONFIG ─────────────────────────
@@ -233,6 +233,21 @@ def filtrar_mes(df, ano, mes):
     return df[(pd.to_datetime(df["data"]).dt.year == ano) & (pd.to_datetime(df["data"]).dt.month == mes)]
 
 
+def mes_anterior(ref):
+    primeiro_dia_mes_atual = ref.replace(day=1)
+    return (primeiro_dia_mes_atual - timedelta(days=1)).replace(day=1)
+
+
+def dias_ate_proximo_mes(hoje):
+    proximo_mes = hoje.month + 1
+    proximo_ano = hoje.year
+    if proximo_mes == 13:
+        proximo_mes = 1
+        proximo_ano += 1
+    primeiro_dia_proximo = date(proximo_ano, proximo_mes, 1)
+    return (primeiro_dia_proximo - hoje).days
+
+
 def orcamento_categoria(row, limite=None):
     """O valor alvo já é salvo em R$ direto — não há mais round-trip via percentual."""
     return row["valor_alvo"]
@@ -283,16 +298,12 @@ df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
-def render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chave="default"):
-    """Cards de total/limite + barra de progresso. Se detalhado=True, mostra também
-    a rosca e as barras por categoria (usado só no Dashboard, não em Lançar)."""
+def render_cards_limite(df_mes, limite_mensal):
+    """Cards de total da fatura / limite disponível + barra de progresso."""
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
-    gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
-    gasto_outros = max(0, total_gasto - gasto_parcel)
-    total_fatura = total_gasto  # compras do mês + parcelamentos
-    disponivel = limite_mensal - total_fatura
+    disponivel = limite_mensal - total_gasto
 
-    cap_esq = fmt_pct(total_fatura / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
+    cap_esq = fmt_pct(total_gasto / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
     if disponivel >= 0 and limite_mensal > 0:
         cap_dir = fmt_pct(disponivel / limite_mensal * 100) + " restante"
     elif disponivel < 0:
@@ -304,7 +315,7 @@ def render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chav
     <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;'>
         <div style='text-align:left;'>
             <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura (R$)</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_fatura:.0f}</div>
+            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>
             <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
         </div>
         <div style='text-align:right;'>
@@ -315,14 +326,21 @@ def render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chav
     </div>
     """, unsafe_allow_html=True)
 
-    st.progress(min(total_fatura / limite_mensal, 1.0) if limite_mensal > 0 else 0)
+    st.progress(min(total_gasto / limite_mensal, 1.0) if limite_mensal > 0 else 0)
 
-    if not detalhado:
-        return
+
+def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
+    """Gráfico de rosca + barras de progresso por categoria."""
+    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
+    gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
+    gasto_outros = max(0, total_gasto - gasto_parcel)
+    disponivel = limite_mensal - total_gasto
 
     # Ordem FIXA (não reordena conforme os valores mudam): parcelamentos sempre
-    # primeiro (2º quadrante), depois despesas, depois disponível — sentido
-    # anti-horário a partir das 12h. sort=False é essencial pra manter essa ordem.
+    # primeiro (2º quadrante), depois despesas, depois disponível. rotation=0
+    # inicia às 12h (padrão do Plotly) e direction="counterclockwise" faz a
+    # sequência avançar 2º → 3º → 4º → 1º quadrante. sort=False mantém essa ordem
+    # fixa mesmo quando os valores mudam.
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_parcel > 0:
@@ -335,7 +353,7 @@ def render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chav
     if valores:
         fig = go.Figure(data=[go.Pie(
             labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
-            sort=False, direction="counterclockwise", rotation=90,
+            sort=False, direction="counterclockwise", rotation=0,
         )])
         fig.update_layout(
             showlegend=True,
@@ -384,25 +402,37 @@ aba_lancar, aba_dash, aba_hist, aba_orc = st.tabs(
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
 
 with aba_lancar:
+    hoje = date.today()
+    df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
+    render_cards_limite(df_mes_atual_lancar, limite_mensal)
+    st.caption(f"faltam {dias_ate_proximo_mes(hoje)} dia(s) para o próximo mês")
+    st.markdown("---")
 
     @st.fragment
     def form_lancamento():
-        df_mes_atual = filtrar_mes(carregar_lancamentos(), date.today().year, date.today().month)
-        gasto_por_cat = df_mes_atual.groupby("categoria")["valor"].sum().to_dict() if not df_mes_atual.empty else {}
+        mes_ant = mes_anterior(hoje)
+        df_mes_ant = filtrar_mes(carregar_lancamentos(), mes_ant.year, mes_ant.month)
+        gasto_mes_ant = df_mes_ant.groupby("categoria")["valor"].sum().to_dict() if not df_mes_ant.empty else {}
 
-        cats_ordenadas = df_cat[df_cat["id"] != FIXED_ID].copy()
-        cats_ordenadas["gasto"] = cats_ordenadas["id"].map(gasto_por_cat).fillna(0)
-        cats_ordenadas = cats_ordenadas.sort_values("gasto", ascending=False)
+        todas_cats = df_cat.copy()
+        todas_cats["nome_lower"] = todas_cats["nome"].str.lower()
+        todas_cats = todas_cats.sort_values("nome_lower")
 
-        opcoes_ids = [FIXED_ID] + cats_ordenadas["id"].tolist()
-        opcoes_labels = {FIXED_ID: "parcelamentos"}
-        opcoes_labels.update(dict(zip(cats_ordenadas["id"], cats_ordenadas["nome"].str.lower())))
+        opcoes_ids = todas_cats["id"].tolist()
+        opcoes_labels = dict(zip(todas_cats["id"], todas_cats["nome_lower"]))
+
+        if gasto_mes_ant:
+            categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get)
+            index_default = opcoes_ids.index(categoria_default) if categoria_default in opcoes_ids else 0
+        else:
+            index_default = 0
 
         with st.form("form_lancar", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
                 categoria_id = st.selectbox(
-                    "categoria", options=opcoes_ids, format_func=lambda x: opcoes_labels[x]
+                    "categoria", options=opcoes_ids, index=index_default,
+                    format_func=lambda x: opcoes_labels[x]
                 )
             with col2:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
@@ -421,11 +451,6 @@ with aba_lancar:
 
     form_lancamento()
 
-    st.markdown("---")
-    hoje = date.today()
-    df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
-    render_resumo_financeiro(df_mes_atual_lancar, limite_mensal, df_cat, detalhado=False, chave="lancar")
-
 with aba_dash:
     render_nav_mes("dash")
 
@@ -433,7 +458,7 @@ with aba_dash:
     df_lanc = carregar_lancamentos()
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
 
-    render_resumo_financeiro(df_mes, limite_mensal, df_cat, detalhado=True, chave="dash")
+    render_grafico_categorias(df_mes, limite_mensal, df_cat, chave="dash")
 
 with aba_hist:
     render_nav_mes("hist")
@@ -495,32 +520,27 @@ with aba_orc:
                                     key=f"limite_{versao}")
     limite_novo = parse_valor(limite_txt)
 
-    st.markdown("##### categorias")
-    st.caption("digite o valor em R$ — a % é calculada automaticamente")
+    st.write("")
 
     df_cat_edit = df_cat.copy()
     valores_editados = {}
     for _, c in df_cat_edit[df_cat_edit["fixo"] == False].iterrows():
         orcamento_atual = orcamento_categoria(c, limite_mensal)
-        col1, col2, col3 = st.columns([5, 0.8, 0.9])
+        col1, col2 = st.columns([5, 1.1])
         with col1:
-            st.markdown(f"{c['nome'].lower()}")
+            st.markdown(f"<div style='padding-top:0.5rem;'>{c['nome'].lower()}</div>", unsafe_allow_html=True)
         with col2:
             v_txt = st.text_input("valor", value=f"{orcamento_atual:.0f}",
                                    key=f"orc_{c['id']}_{versao}", label_visibility="collapsed")
-        with col3:
-            v = parse_valor(v_txt)
-            pct_calc = (v / limite_novo * 100) if limite_novo > 0 else 0
-            st.markdown(f"<div style='text-align:right;color:#888;'>{fmt_pct(pct_calc)}</div>", unsafe_allow_html=True)
-        valores_editados[c["id"]] = v
+        valores_editados[c["id"]] = parse_valor(v_txt)
+        st.markdown("<hr style='margin:2px 0;border-color:#242424;'>", unsafe_allow_html=True)
 
     soma = sum(valores_editados.values())
-    pct_usado = (soma / limite_novo * 100) if limite_novo > 0 else 0
-    st.progress(min(pct_usado / 100, 1.0))
-    if pct_usado > 100:
+    st.write("")
+    if limite_novo > 0 and soma > limite_novo:
         st.markdown(f"<span style='color:#e05252;'>excede em {formatar_brl(soma - limite_novo)}</span>", unsafe_allow_html=True)
     else:
-        st.caption(f"alocado: {fmt_pct(pct_usado)} · disponível: {formatar_brl(max(0, limite_novo - soma))}")
+        st.caption(f"disponível: {formatar_brl(max(0, limite_novo - soma))}")
 
     with st.expander("+ nova categoria"):
         col_nome, col_val = st.columns([3, 1])
@@ -550,37 +570,20 @@ with aba_orc:
                     st.success(f"'{novo_nome.strip().lower()}' adicionada.")
                     st.rerun(scope="app")
 
-    st.markdown("---")
-    col_save, col_del = st.columns(2)
-    with col_save:
-        if st.button("salvar orçamento", use_container_width=True):
-            if limite_novo <= 0:
-                st.error("informe um limite mensal válido antes de salvar.")
-            elif any(v > 1_000_000 for v in valores_editados.values()):
-                st.error("algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
-            elif soma > limite_novo:
-                st.error("soma ultrapassa o limite.")
-            else:
-                df_cat_edit.loc[df_cat_edit["fixo"] == False, "valor_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
-                    lambda i: valores_editados[i]
-                )
-                salvar_configuracoes(limite_novo, df_cat_edit)
-                st.session_state["orc_versao"] += 1
-                st.success("orçamento salvo!")
-                st.rerun(scope="app")
-    with col_del:
-        if st.button("🗑️ apagar todos os lançamentos", use_container_width=True):
-            st.session_state["confirmar_delete"] = True
-    if st.session_state.get("confirmar_delete"):
-        st.warning("tem certeza? essa ação apaga todos os lançamentos e não pode ser desfeita.")
-        c1, c2 = st.columns(2)
-        if c1.button("sim, apagar tudo"):
-            ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
-            ws.clear()
-            ws.append_row(["data", "categoria", "descricao", "valor"])
-            recarregar_lancamentos()
-            st.session_state["confirmar_delete"] = False
+    st.write("")
+    if st.button("salvar orçamento", use_container_width=True):
+        if limite_novo <= 0:
+            st.error("informe um limite mensal válido antes de salvar.")
+        elif any(v > 1_000_000 for v in valores_editados.values()):
+            st.error("algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
+        elif soma > limite_novo:
+            st.error("soma ultrapassa o limite.")
+        else:
+            df_cat_edit.loc[df_cat_edit["fixo"] == False, "valor_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
+                lambda i: valores_editados[i]
+            )
+            salvar_configuracoes(limite_novo, df_cat_edit)
+            st.session_state["orc_versao"] += 1
+            st.success("orçamento salvo!")
             st.rerun(scope="app")
-        if c2.button("cancelar"):
-            st.session_state["confirmar_delete"] = False
-            st.rerun()
+
