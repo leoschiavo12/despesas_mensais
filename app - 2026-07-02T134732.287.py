@@ -339,7 +339,10 @@ def render_cards_limite(df_mes, limite_mensal):
     hoje = date.today()
     prox_mes_num = hoje.month + 1 if hoje.month < 12 else 1
     prox_ano = hoje.year if hoje.month < 12 else hoje.year + 1
-    texto_dias = f"faltam {dias_ate_proximo_mes(hoje)} dias para {mes_label(date(prox_ano, prox_mes_num, 1))}"
+    meses_extenso = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                      "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+    nome_prox_mes = meses_extenso[prox_mes_num - 1]
+    texto_dias = f"{dias_ate_proximo_mes(hoje)} dias até {nome_prox_mes}"
 
     st.markdown(f"""
     <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;'>
