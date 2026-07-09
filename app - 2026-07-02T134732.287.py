@@ -68,12 +68,21 @@ div[data-testid="stButton"] button {
 }
 div[data-testid="stTextInput"] input,
 div[data-testid="stDateInput"] input,
-div[data-testid="stNumberInput"] input,
-div[data-baseweb="select"] > div {
+div[data-testid="stNumberInput"] input {
     min-height: 1.8rem !important;
     height: 1.8rem !important;
     padding: 0.2rem 0.5rem !important;
     font-size: 0.8rem !important;
+}
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+    min-height: 1.8rem !important;
+    height: 1.8rem !important;
+    font-size: 0.8rem !important;
+}
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div {
+    padding-top: 0.2rem !important;
+    padding-bottom: 0.2rem !important;
 }
 div[data-baseweb="input"],
 div[data-baseweb="base-input"] {
@@ -81,7 +90,8 @@ div[data-baseweb="base-input"] {
 }
 div[data-testid="stTextInput"],
 div[data-testid="stDateInput"],
-div[data-testid="stNumberInput"] {
+div[data-testid="stNumberInput"],
+div[data-testid="stSelectbox"] {
     margin-bottom: 0 !important;
 }
 div[data-testid="stWidgetLabel"] p {
@@ -89,6 +99,13 @@ div[data-testid="stWidgetLabel"] p {
 }
 div[data-testid="stWidgetLabel"] {
     margin-bottom: 0.1rem !important;
+}
+div[data-testid="stForm"] {
+    padding: 0.8rem 1rem !important;
+    border-color: #2a2a2a !important;
+}
+div[data-testid="stForm"] div[data-testid="stVerticalBlock"] {
+    gap: 0.5rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
