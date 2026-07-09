@@ -356,9 +356,9 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
 
     # Ordem FIXA (não reordena conforme os valores mudam): parcelamentos sempre
     # primeiro (2º quadrante), depois despesas, depois disponível. rotation=0
-    # inicia às 12h (padrão do Plotly) e direction="counterclockwise" faz a
-    # sequência avançar 2º → 3º → 4º → 1º quadrante. sort=False mantém essa ordem
-    # fixa mesmo quando os valores mudam.
+    # inicia às 12h (padrão do Plotly). direction="clockwise" aqui, na prática,
+    # é o que produz o preenchimento visual anti-horário (2º→3º→4º→1º quadrante)
+    # — testamos e confirmamos que o Plotly inverte o sentido do que o nome sugere.
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
     if gasto_parcel > 0:
@@ -371,7 +371,7 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
     if valores:
         fig = go.Figure(data=[go.Pie(
             labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
-            sort=False, direction="counterclockwise", rotation=0,
+            sort=False, direction="clockwise", rotation=0,
         )])
         fig.update_layout(
             showlegend=True,
