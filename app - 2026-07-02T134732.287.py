@@ -394,11 +394,14 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
     if valores:
         soma_valores = sum(valores)
         percentuais = [fmt_pct(v / soma_valores * 100) for v in valores]
+        valores_fmt = [f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
         fig = go.Figure(data=[go.Pie(
             labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
             sort=False, direction="clockwise", rotation=0,
             text=percentuais, texttemplate="%{label}<br>%{text}", textposition="outside",
             textfont=dict(size=13, color="#e8e8e6"),
+            customdata=valores_fmt,
+            hovertemplate="%{label}<br>R$ %{customdata}<br>%{text}<extra></extra>",
             automargin=True,
         )])
         fig.update_layout(
