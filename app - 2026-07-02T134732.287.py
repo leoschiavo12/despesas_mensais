@@ -51,6 +51,15 @@ st.set_page_config(page_title="controle de fatura", layout="centered")
 # excluir, etc.) quebra em blocos empilhados no mobile.
 st.markdown("""
 <style>
+/* Estreita o app inteiro (mesmo no desktop) — dá cara de app, não de planilha larga */
+div[data-testid="stAppViewContainer"] .block-container,
+section.main .block-container {
+    max-width: 480px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-top: 2rem !important;
+}
+
 @media (max-width: 640px) {
     div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
@@ -59,42 +68,42 @@ st.markdown("""
         min-width: 0 !important;
     }
 }
-div[data-testid="stButton"] button {
+div[data-testid="stButton"] button, button {
     padding: 0.1rem 0.5rem !important;
     min-height: 1.8rem !important;
     height: 1.8rem !important;
     font-size: 0.8rem !important;
     line-height: 1 !important;
 }
-div[data-testid="stTextInput"] input,
-div[data-testid="stDateInput"] input,
-div[data-testid="stNumberInput"] input {
+input, textarea {
     min-height: 1.8rem !important;
     height: 1.8rem !important;
     padding: 0.2rem 0.5rem !important;
     font-size: 0.8rem !important;
 }
-div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+div[data-baseweb="select"],
+div[data-baseweb="select"] > div,
+div[data-baseweb="select"] > div > div {
     min-height: 1.8rem !important;
     height: 1.8rem !important;
     font-size: 0.8rem !important;
-}
-div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div {
-    padding-top: 0.2rem !important;
-    padding-bottom: 0.2rem !important;
+    padding-top: 0.15rem !important;
+    padding-bottom: 0.15rem !important;
 }
 div[data-baseweb="input"],
 div[data-baseweb="base-input"] {
     min-height: 1.8rem !important;
+    height: 1.8rem !important;
 }
 div[data-testid="stTextInput"],
 div[data-testid="stDateInput"],
 div[data-testid="stNumberInput"],
-div[data-testid="stSelectbox"] {
+div[data-testid="stSelectbox"],
+div[data-testid="stElementContainer"] {
     margin-bottom: 0 !important;
 }
-div[data-testid="stWidgetLabel"] p {
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] label {
     font-size: 0.78rem !important;
 }
 div[data-testid="stWidgetLabel"] {
