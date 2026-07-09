@@ -52,30 +52,40 @@ st.set_page_config(page_title="controle de fatura", layout="centered")
 st.markdown("""
 <style>
 @media (max-width: 640px) {
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
-        width: auto !important;
-        flex: 1 1 0 !important;
-        min-width: 0 !important;
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
     }
 }
 div[data-testid="stButton"] button {
     padding: 0.1rem 0.5rem !important;
-    min-height: 1.9rem !important;
-    height: 1.9rem !important;
-    font-size: 0.85rem !important;
+    min-height: 1.8rem !important;
+    height: 1.8rem !important;
+    font-size: 0.8rem !important;
     line-height: 1 !important;
 }
 div[data-testid="stTextInput"] input,
 div[data-testid="stDateInput"] input,
 div[data-testid="stNumberInput"] input,
 div[data-baseweb="select"] > div {
-    min-height: 1.9rem !important;
-    height: 1.9rem !important;
-    padding: 0.25rem 0.6rem !important;
-    font-size: 0.85rem !important;
+    min-height: 1.8rem !important;
+    height: 1.8rem !important;
+    padding: 0.2rem 0.5rem !important;
+    font-size: 0.8rem !important;
+}
+div[data-baseweb="input"],
+div[data-baseweb="base-input"] {
+    min-height: 1.8rem !important;
+}
+div[data-testid="stTextInput"],
+div[data-testid="stDateInput"],
+div[data-testid="stNumberInput"] {
+    margin-bottom: 0 !important;
 }
 div[data-testid="stWidgetLabel"] p {
-    font-size: 0.8rem !important;
+    font-size: 0.78rem !important;
+}
+div[data-testid="stWidgetLabel"] {
+    margin-bottom: 0.1rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -354,19 +364,20 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave):
     gasto_outros = max(0, total_gasto - gasto_parcel)
     disponivel = limite_mensal - total_gasto
 
-    # Ordem FIXA (não reordena conforme os valores mudam): parcelamentos sempre
-    # primeiro (2º quadrante), depois despesas, depois disponível. rotation=0
-    # inicia às 12h (padrão do Plotly). direction="clockwise" aqui, na prática,
-    # é o que produz o preenchimento visual anti-horário (2º→3º→4º→1º quadrante)
-    # — testamos e confirmamos que o Plotly inverte o sentido do que o nome sugere.
+    # Ordem FIXA (não reordena conforme os valores mudam). O Plotly sempre desenha
+    # a 1ª fatia da lista começando às 12h e indo para a direita (1º quadrante),
+    # não importa o "direction" — confirmado empiricamente. Então, pra parcelamentos
+    # cair no 2º quadrante (que fica "antes" das 12h, lendo a partir da esquerda),
+    # ela precisa ser a ÚLTIMA fatia da lista: despesas → disponível → parcelamentos.
+    # Assim parcelamentos termina exatamente às 12h, ocupando o 2º quadrante.
     fatia_disp = max(0, disponivel)
     labels, valores, cores = [], [], []
-    if gasto_parcel > 0:
-        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
     if gasto_outros > 0:
         labels.append("despesas"); valores.append(gasto_outros); cores.append("#D85A30")
     if fatia_disp > 0:
         labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
+    if gasto_parcel > 0:
+        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
 
     if valores:
         fig = go.Figure(data=[go.Pie(
