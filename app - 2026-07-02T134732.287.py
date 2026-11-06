@@ -388,6 +388,10 @@ def render_cards_limite(df_mes, limite_mensal):
     nome_prox_mes = meses_extenso[prox_mes_num - 1]
     texto_dias = f"{dias_ate_proximo_mes(hoje)} dias até {nome_prox_mes}"
 
+    import calendar
+    dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+    pct_mes = fmt_pct(hoje.day / dias_no_mes * 100) + " do mês"
+
     st.markdown(f"""
     <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;'>
         <div style='text-align:left;'>
@@ -395,7 +399,10 @@ def render_cards_limite(df_mes, limite_mensal):
             <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>
             <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
         </div>
-        <div style='text-align:center;color:#888;font-size:12px;flex:1;'>{texto_dias}</div>
+        <div style='text-align:center;color:#888;font-size:12px;flex:1;'>
+            <div>{texto_dias}</div>
+            <div style='margin-top:2px;'>{pct_mes}</div>
+        </div>
         <div style='text-align:right;'>
             <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível (R$)</div>
             <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{abs(disponivel):.0f}</div>
@@ -530,7 +537,7 @@ with aba_lancar:
 
             col_desc, col_data = st.columns([1.4, 1])
             with col_desc:
-                descricao = st.text_input("descrição", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
+                descricao = st.text_input("descrição")
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
 
