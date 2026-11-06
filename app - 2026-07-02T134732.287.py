@@ -580,7 +580,9 @@ with aba_hist:
             item_id = f"{idx_row}_{r['data']}_{r['categoria']}_{r['valor']}"
             pendente_key = f"pendente_del_{item_id}"
 
-            col_acao, col_desc, col_val = st.columns([0.4, 4, 2])
+            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
+            with col_desc:
+                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col_acao:
                 if st.session_state.get(pendente_key):
                     subok, subcancel = st.columns(2)
@@ -597,8 +599,6 @@ with aba_hist:
                     if st.button("✕", key=f"del_{item_id}", use_container_width=True):
                         st.session_state[pendente_key] = True
                         st.rerun()
-            with col_desc:
-                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col_val:
                 st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
 
