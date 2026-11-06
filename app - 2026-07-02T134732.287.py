@@ -13,6 +13,7 @@ CONFIGURAÇÃO NECESSÁRIA ANTES DO DEPLOY:
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import gspread
 from gspread.utils import ValueRenderOption
@@ -345,6 +346,23 @@ def mudar_mes(delta):
         st.session_state["mes_ref"] = candidato
 
 
+def ativar_teclado_numerico(aria_label):
+    """Troca o teclado do celular (ao focar o campo) para o numérico com vírgula/ponto,
+    em vez do teclado alfabético padrão — via inputmode='decimal' injetado por JS."""
+    components.html(f"""
+    <script>
+    function ajustar() {{
+        const doc = window.parent.document;
+        const campos = doc.querySelectorAll('input[aria-label="{aria_label}"]');
+        campos.forEach(el => el.setAttribute('inputmode', 'decimal'));
+    }}
+    ajustar();
+    const obs = new MutationObserver(ajustar);
+    obs.observe(window.parent.document.body, {{childList: true, subtree: true}});
+    </script>
+    """, height=0)
+
+
 def render_nav_mes(prefixo):
     """Navegador de mês com setas nas extremidades (mesmo espírito dos cards)."""
     colA, colB, colC = st.columns([1, 10, 1])
@@ -540,6 +558,8 @@ with aba_lancar:
                 descricao = st.text_input("descrição")
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+
+            ativar_teclado_numerico("valor (R$)")
 
             enviado = st.form_submit_button("registrar gasto", use_container_width=True)
 
