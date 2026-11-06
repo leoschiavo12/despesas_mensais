@@ -114,12 +114,11 @@ div[data-testid="stWidgetLabel"] {
     margin-bottom: 0.2rem !important;
 }
 
-/* campos: fundo levemente destacado, borda sutil e cantos arredondados —
-   dá "cara de app" em vez de inputs crus de formulário */
+/* campos: borda sutil e cantos arredondados — dá "cara de app" em vez
+   de inputs crus de formulário (sem alterar o fundo) */
 input, textarea,
 div[data-baseweb="select"] > div,
 div[data-baseweb="base-input"] {
-    background-color: #17171c !important;
     border: 1px solid #2c2c33 !important;
     border-radius: 8px !important;
 }
@@ -520,18 +519,18 @@ with aba_lancar:
             index_default = 0
 
         with st.form("form_lancar", clear_on_submit=True):
-            col_cat, col_desc = st.columns([1, 1.4])
+            col_cat, col_val = st.columns([1.4, 1])
             with col_cat:
                 categoria_id = st.selectbox(
                     "categoria", options=opcoes_ids, index=index_default,
                     format_func=lambda x: opcoes_labels[x]
                 )
-            with col_desc:
-                descricao = st.text_input("descrição (opcional)", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
-
-            col_val, col_data = st.columns([1, 1])
             with col_val:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
+
+            col_desc, col_data = st.columns([1.4, 1])
+            with col_desc:
+                descricao = st.text_input("descrição", placeholder="ex: almoço no tabuã, uber p/ valinhos...")
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
 
