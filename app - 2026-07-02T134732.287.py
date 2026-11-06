@@ -584,23 +584,28 @@ with aba_hist:
             with col_desc:
                 st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col_acao:
-                if st.session_state.get(pendente_key):
-                    subok, subcancel = st.columns(2)
-                    with subok:
-                        if st.button("✓", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                            excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
-                            st.session_state.pop(pendente_key, None)
-                            st.rerun(scope="app")
-                    with subcancel:
-                        if st.button("✕", key=f"cancel_{item_id}", use_container_width=True):
-                            st.session_state.pop(pendente_key, None)
-                            st.rerun()
-                else:
+                if not st.session_state.get(pendente_key):
                     if st.button("✕", key=f"del_{item_id}", use_container_width=True):
                         st.session_state[pendente_key] = True
                         st.rerun()
             with col_val:
                 st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
+
+            if st.session_state.get(pendente_key):
+                st.markdown(
+                    "<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>excluir este lançamento?</div>",
+                    unsafe_allow_html=True,
+                )
+                col_confirma, col_cancela = st.columns(2)
+                with col_confirma:
+                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                        excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun(scope="app")
+                with col_cancela:
+                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun()
 
         csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
         st.download_button(
