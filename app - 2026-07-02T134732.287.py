@@ -593,7 +593,10 @@ with aba_hist:
     if df_mes.empty:
         st.caption("nenhum lançamento neste mês.")
     else:
-        df_mes_ordenado = df_mes.sort_values("data", ascending=False)
+        # inverte a ordem original (último inserido vira o primeiro) e então
+        # ordena por data de forma estável — dentro do mesmo dia, mantém o
+        # último lançado em primeiro lugar, em vez da ordem de inserção crua.
+        df_mes_ordenado = df_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for idx_row, (_, r) in enumerate(df_mes_ordenado.iterrows()):
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
