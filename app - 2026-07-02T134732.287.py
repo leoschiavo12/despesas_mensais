@@ -390,7 +390,7 @@ def render_cards_limite(df_mes, limite_mensal):
 
     import calendar
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
-    pct_mes = fmt_pct(hoje.day / dias_no_mes * 100) + " do mês"
+    pct_mes = fmt_pct((1 - hoje.day / dias_no_mes) * 100) + " do mês restante"
 
     st.markdown(f"""
     <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;'>
