@@ -104,17 +104,36 @@ div[data-testid="stElementContainer"] {
 }
 div[data-testid="stWidgetLabel"] p,
 div[data-testid="stWidgetLabel"] label {
-    font-size: 0.78rem !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    color: rgba(230,230,230,0.55) !important;
+    font-weight: 500 !important;
 }
 div[data-testid="stWidgetLabel"] {
-    margin-bottom: 0.1rem !important;
+    margin-bottom: 0.2rem !important;
 }
+
+/* campos: fundo levemente destacado, borda sutil e cantos arredondados —
+   dá "cara de app" em vez de inputs crus de formulário */
+input, textarea,
+div[data-baseweb="select"] > div,
+div[data-baseweb="base-input"] {
+    background-color: #17171c !important;
+    border: 1px solid #2c2c33 !important;
+    border-radius: 8px !important;
+}
+div[data-baseweb="input"] {
+    border-radius: 8px !important;
+}
+
 div[data-testid="stForm"] {
-    padding: 0.8rem 1rem !important;
-    border-color: #2a2a2a !important;
+    padding: 1rem 1.1rem !important;
+    border: 1px solid #202024 !important;
+    border-radius: 12px !important;
 }
 div[data-testid="stForm"] div[data-testid="stVerticalBlock"] {
-    gap: 0.5rem !important;
+    gap: 0.9rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
