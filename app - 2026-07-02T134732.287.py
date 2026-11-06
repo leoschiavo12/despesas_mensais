@@ -430,6 +430,7 @@ def render_cards_limite(df_mes, limite_mensal):
     """, unsafe_allow_html=True)
 
     st.progress(min(total_gasto / limite_mensal, 1.0) if limite_mensal > 0 else 0)
+    st.progress(min(hoje.day / dias_no_mes, 1.0))
 
 
 def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
