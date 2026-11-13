@@ -69,32 +69,49 @@ section.main .block-container {
         min-width: 0 !important;
     }
 }
-div[data-testid="stButton"] button, button {
+/* altura única para campos e botão do formulário (texto alinhado entre eles) */
+:root { --altura-campo: 2.5rem; }
+
+/* botões pequenos do app (✕, setas, exportar) */
+div[data-testid="stButton"] button,
+div[data-testid="stDownloadButton"] button {
     padding: 0.1rem 0.5rem !important;
     min-height: 1.8rem !important;
     height: 1.8rem !important;
     font-size: 0.8rem !important;
     line-height: 1 !important;
 }
-input, textarea {
-    min-height: 1.8rem !important;
-    height: 1.8rem !important;
-    padding: 0.2rem 0.5rem !important;
-    font-size: 0.8rem !important;
+/* botão de enviar do formulário: mesma altura dos campos */
+div[data-testid="stFormSubmitButton"] button {
+    min-height: var(--altura-campo) !important;
+    height: var(--altura-campo) !important;
+    font-size: 0.9rem !important;
+    line-height: 1 !important;
+    border-radius: 8px !important;
 }
-div[data-baseweb="select"],
-div[data-baseweb="select"] > div,
-div[data-baseweb="select"] > div > div {
-    min-height: 1.8rem !important;
-    height: 1.8rem !important;
-    font-size: 0.8rem !important;
-    padding-top: 0.15rem !important;
-    padding-bottom: 0.15rem !important;
+
+/* campos: a borda fica só no contêiner externo; o <input> interno é transparente
+   e preenche o contêiner — evita a "borda dupla" que desalinhava o texto */
+div[data-baseweb="input"] {
+    min-height: var(--altura-campo) !important;
+    height: var(--altura-campo) !important;
+    border: 1px solid #2c2c33 !important;
+    border-radius: 8px !important;
+    box-sizing: border-box !important;
 }
-div[data-baseweb="input"],
 div[data-baseweb="base-input"] {
-    min-height: 1.8rem !important;
-    height: 1.8rem !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    border: none !important;
+    background: transparent !important;
+}
+div[data-baseweb="input"] input {
+    height: 100% !important;
+    min-height: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 0.7rem !important;
+    font-size: 0.9rem !important;
 }
 div[data-testid="stTextInput"],
 div[data-testid="stDateInput"],
@@ -115,16 +132,15 @@ div[data-testid="stWidgetLabel"] {
     margin-bottom: 0.2rem !important;
 }
 
-/* campos: borda sutil e cantos arredondados — dá "cara de app" em vez
-   de inputs crus de formulário (sem alterar o fundo) */
-input, textarea,
-div[data-baseweb="select"] > div,
-div[data-baseweb="base-input"] {
-    border: 1px solid #2c2c33 !important;
-    border-radius: 8px !important;
+/* categorias em botões de toque (pills): ajuste de tamanho e quebra de linha */
+div[data-testid="stButtonGroup"] {
+    flex-wrap: wrap !important;
+    gap: 0.4rem !important;
 }
-div[data-baseweb="input"] {
-    border-radius: 8px !important;
+div[data-testid="stButtonGroup"] button {
+    min-height: 2.1rem !important;
+    padding: 0.2rem 0.8rem !important;
+    font-size: 0.85rem !important;
 }
 
 div[data-testid="stForm"] {
@@ -348,7 +364,6 @@ def mudar_mes(delta):
 
 def ativar_campos_formulario(aria_label_valor):
     """Ajustes de entrada via JS (o Streamlit não expõe isso nativamente):
-    - seletores (selectbox): sem cursor/digitação — só toque e escolha;
     - campo de valor: teclado numérico e máscara de centavos (digita só números,
       a vírgula fica fixa com 2 casas: 1 -> 0,01 | 1250 -> 12,50)."""
     components.html(f"""
@@ -361,12 +376,6 @@ def ativar_campos_formulario(aria_label_valor):
         return Math.floor(c / 100) + ',' + String(c % 100).padStart(2, '0');
     }}
     function ajustar() {{
-        doc.querySelectorAll('div[data-baseweb="select"] input').forEach(el => {{
-            el.readOnly = true;
-            el.setAttribute('inputmode', 'none');
-            el.style.caretColor = 'transparent';
-            el.style.cursor = 'pointer';
-        }});
         doc.querySelectorAll('input[aria-label="{aria_label_valor}"]').forEach(el => {{
             el.setAttribute('inputmode', 'numeric');
             if (el.dataset.mascara) return;
@@ -603,20 +612,20 @@ with aba_lancar:
             index_default = 0
 
         with st.form("form_lancar", clear_on_submit=True):
-            col_cat, col_val = st.columns([1.4, 1])
-            with col_cat:
-                categoria_id = st.selectbox(
-                    "categoria", options=opcoes_ids, index=index_default,
-                    format_func=lambda x: opcoes_labels[x]
-                )
+            categoria_sel = st.pills(
+                "categoria", options=opcoes_ids, default=opcoes_ids[index_default],
+                selection_mode="single", format_func=lambda x: opcoes_labels[x],
+            )
+            # se o usuário desmarcar a pill, usa a categoria padrão
+            categoria_id = categoria_sel or opcoes_ids[index_default]
+
+            col_val, col_data = st.columns([1, 1])
             with col_val:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
-
-            col_desc, col_data = st.columns([1.4, 1])
-            with col_desc:
-                descricao = st.text_input("descrição")
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+
+            descricao = st.text_input("descrição")
 
             ativar_campos_formulario("valor (R$)")
 
