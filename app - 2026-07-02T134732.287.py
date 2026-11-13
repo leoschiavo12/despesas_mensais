@@ -385,52 +385,84 @@ df_cat = carregar_categorias()
 config = carregar_config()
 limite_mensal = config["limite_mensal"]
 
+def _html_brl(v):
+    """R$ formatado com o cifrão como entidade HTML (evita o Markdown ler dois '$' como LaTeX)."""
+    return formatar_brl(v).replace("$", "&#36;")
+
+
+def _barra_html(titulo, direita, pct, cor, marcador=None):
+    """Barra de progresso própria: rótulo à esquerda, números à direita, marcador opcional."""
+    largura = min(max(pct, 0), 1) * 100
+    marca = ""
+    if marcador is not None:
+        marca = (f"<div style='position:absolute;left:{min(max(marcador, 0), 1) * 100:.1f}%;"
+                 "top:-3px;bottom:-3px;width:2px;background:#e8e8e6;opacity:0.85;'></div>")
+    return (
+        "<div style='margin-top:16px;'>"
+        "<div style='display:flex;justify-content:space-between;align-items:baseline;"
+        "font-size:12px;color:#9a9a9a;margin-bottom:6px;'>"
+        f"<span style='text-transform:uppercase;letter-spacing:0.04em;font-size:11px;'>{titulo}</span>"
+        f"<span>{direita}</span></div>"
+        "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
+        f"<div style='width:{largura:.1f}%;height:100%;background:{cor};border-radius:6px;'></div>"
+        f"{marca}</div></div>"
+    )
+
+
 def render_cards_limite(df_mes, limite_mensal):
-    """Cards de total da fatura / limite disponível + texto central de dias + barra de progresso."""
+    """Painel da aba lançar: total da fatura / limite disponível + barras de fatura e de mês."""
+    import calendar
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     disponivel = limite_mensal - total_gasto
 
-    cap_esq = fmt_pct(total_gasto / limite_mensal * 100) + " do limite" if limite_mensal > 0 else ""
-    if disponivel >= 0 and limite_mensal > 0:
-        cap_dir = fmt_pct(disponivel / limite_mensal * 100) + " restante"
-    elif disponivel < 0:
-        cap_dir = "excedido"
-    else:
-        cap_dir = ""
-
     hoje = date.today()
+    dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+    pct_mes = hoje.day / dias_no_mes
+    pct_fatura = total_gasto / limite_mensal if limite_mensal > 0 else 0
+
+    # cor/estado da fatura comparando com o ritmo do mês
+    if pct_fatura > 1:
+        cor_fatura, status = "#e05252", "limite excedido"
+    elif pct_fatura > pct_mes:
+        cor_fatura, status = "#E5B800", "acima do ritmo do mês"
+    else:
+        cor_fatura, status = "#1D9E75", "dentro do ritmo do mês"
+
     prox_mes_num = hoje.month + 1 if hoje.month < 12 else 1
-    prox_ano = hoje.year if hoje.month < 12 else hoje.year + 1
     meses_extenso = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
                       "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
-    nome_prox_mes = meses_extenso[prox_mes_num - 1]
-    texto_dias = f"{dias_ate_proximo_mes(hoje)} dias até {nome_prox_mes}"
+    texto_dias = f"{dias_ate_proximo_mes(hoje)} dias até {meses_extenso[prox_mes_num - 1]}"
 
-    import calendar
-    dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
-    pct_mes = fmt_pct((1 - hoje.day / dias_no_mes) * 100) + " do mês restante"
+    label_disp = "limite disponível (R$)" if disponivel >= 0 else "limite excedido (R$)"
+    cor_disp = "inherit" if disponivel >= 0 else "#e05252"
 
-    st.markdown(f"""
-    <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;'>
-        <div style='text-align:left;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>total da fatura (R$)</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>
-            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_esq}</div>
-        </div>
-        <div style='text-align:center;color:#888;font-size:12px;flex:1;'>
-            <div>{texto_dias}</div>
-            <div style='margin-top:2px;'>{pct_mes}</div>
-        </div>
-        <div style='text-align:right;'>
-            <div style='font-size:14px;color:rgba(250,250,250,0.6);'>limite disponível (R$)</div>
-            <div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{abs(disponivel):.0f}</div>
-            <div style='font-size:13px;color:#888;margin-top:2px;'>{cap_dir}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.progress(min(total_gasto / limite_mensal, 1.0) if limite_mensal > 0 else 0)
-    st.progress(min(hoje.day / dias_no_mes, 1.0))
+    html = (
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        "<div style='text-align:left;'>"
+        "<div style='font-size:13px;color:rgba(250,250,250,0.6);'>total da fatura (R&#36;)</div>"
+        f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>"
+        "</div>"
+        f"<div style='text-align:center;color:#888;font-size:12px;flex:1;padding:0 6px;'>{texto_dias}</div>"
+        "<div style='text-align:right;'>"
+        f"<div style='font-size:13px;color:rgba(250,250,250,0.6);'>{label_disp.replace('$', '&#36;')}</div>"
+        f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
+        "</div></div>"
+        + _barra_html(
+            "fatura",
+            f"<span style='color:{cor_fatura};'>{fmt_pct(pct_fatura * 100)} do limite · {status}</span>",
+            pct_fatura, cor_fatura, marcador=pct_mes,
+        )
+        + _barra_html(
+            "mês",
+            f"dia {hoje.day} de {dias_no_mes} · {fmt_pct((1 - pct_mes) * 100)} restante",
+            pct_mes, "#6b7280",
+        )
+        + "<div style='font-size:11px;color:#666;margin-top:10px;'>"
+        "a marca branca na barra da fatura mostra onde ela deveria estar hoje, proporcional ao mês.</div>"
+        "</div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
@@ -523,7 +555,7 @@ with aba_lancar:
     hoje = date.today()
     df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
     render_cards_limite(df_mes_atual_lancar, limite_mensal)
-    st.markdown("---")
+    st.write("")
 
     @st.fragment
     def form_lancamento():
