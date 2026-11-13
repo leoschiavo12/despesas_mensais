@@ -390,18 +390,28 @@ def _html_brl(v):
     return formatar_brl(v).replace("$", "&#36;")
 
 
+ICONE_CARTAO = (
+    "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#9a9a9a' stroke-width='1.8' "
+    "stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='5' width='20' height='14' rx='2.5'/>"
+    "<line x1='2' y1='10' x2='22' y2='10'/><line x1='6' y1='15' x2='10' y2='15'/></svg>"
+)
+ICONE_CALENDARIO = (
+    "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#9a9a9a' stroke-width='1.8' "
+    "stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4.5' width='18' height='16.5' rx='2.5'/>"
+    "<line x1='3' y1='10' x2='21' y2='10'/><line x1='8' y1='2.5' x2='8' y2='6.5'/>"
+    "<line x1='16' y1='2.5' x2='16' y2='6.5'/></svg>"
+)
+
+
 def _barra_html(titulo, direita, pct, cor, marcador=None):
     """Barra de progresso própria: rótulo à esquerda, números à direita, marcador opcional."""
     largura = min(max(pct, 0), 1) * 100
     marca = ""
-    if marcador is not None:
-        marca = (f"<div style='position:absolute;left:{min(max(marcador, 0), 1) * 100:.1f}%;"
-                 "top:-3px;bottom:-3px;width:2px;background:#e8e8e6;opacity:0.85;'></div>")
     return (
         "<div style='margin-top:16px;'>"
-        "<div style='display:flex;justify-content:space-between;align-items:baseline;"
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
         "font-size:12px;color:#9a9a9a;margin-bottom:6px;'>"
-        f"<span style='text-transform:uppercase;letter-spacing:0.04em;font-size:11px;'>{titulo}</span>"
+        f"<span style='display:flex;align-items:center;'>{titulo}</span>"
         f"<span>{direita}</span></div>"
         "<div style='position:relative;height:8px;background:#202024;border-radius:6px;'>"
         f"<div style='width:{largura:.1f}%;height:100%;background:{cor};border-radius:6px;'></div>"
@@ -428,11 +438,6 @@ def render_cards_limite(df_mes, limite_mensal):
     else:
         cor_fatura, status = "#1D9E75", "dentro do ritmo do mês"
 
-    prox_mes_num = hoje.month + 1 if hoje.month < 12 else 1
-    meses_extenso = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
-                      "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
-    texto_dias = f"{dias_ate_proximo_mes(hoje)} dias até {meses_extenso[prox_mes_num - 1]}"
-
     label_disp = "limite disponível (R$)" if disponivel >= 0 else "limite excedido (R$)"
     cor_disp = "inherit" if disponivel >= 0 else "#e05252"
 
@@ -443,24 +448,21 @@ def render_cards_limite(df_mes, limite_mensal):
         "<div style='font-size:13px;color:rgba(250,250,250,0.6);'>total da fatura (R&#36;)</div>"
         f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>"
         "</div>"
-        f"<div style='text-align:center;color:#888;font-size:12px;flex:1;padding:0 6px;'>{texto_dias}</div>"
         "<div style='text-align:right;'>"
         f"<div style='font-size:13px;color:rgba(250,250,250,0.6);'>{label_disp.replace('$', '&#36;')}</div>"
         f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
         "</div></div>"
         + _barra_html(
-            "fatura",
-            f"<span style='color:{cor_fatura};'>{fmt_pct(pct_fatura * 100)} do limite · {status}</span>",
-            pct_fatura, cor_fatura, marcador=pct_mes,
+            ICONE_CARTAO,
+            f"<span style='color:{cor_fatura};'>{fmt_pct(pct_fatura * 100)} consumido</span>",
+            pct_fatura, cor_fatura,
         )
         + _barra_html(
-            "mês",
-            f"dia {hoje.day} de {dias_no_mes} · {fmt_pct((1 - pct_mes) * 100)} restante",
+            ICONE_CALENDARIO,
+            f"{fmt_pct(pct_mes * 100)} decorrido",
             pct_mes, "#6b7280",
         )
-        + "<div style='font-size:11px;color:#666;margin-top:10px;'>"
-        "a marca branca na barra da fatura mostra onde ela deveria estar hoje, proporcional ao mês.</div>"
-        "</div>"
+        + "</div>"
     )
     st.markdown(html, unsafe_allow_html=True)
 
