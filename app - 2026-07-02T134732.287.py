@@ -346,19 +346,43 @@ def mudar_mes(delta):
         st.session_state["mes_ref"] = candidato
 
 
-def ativar_teclado_numerico(aria_label):
-    """Troca o teclado do celular (ao focar o campo) para o numérico com vírgula/ponto,
-    em vez do teclado alfabético padrão — via inputmode='decimal' injetado por JS."""
+def ativar_campos_formulario(aria_label_valor):
+    """Ajustes de entrada via JS (o Streamlit não expõe isso nativamente):
+    - seletores (selectbox): sem cursor/digitação — só toque e escolha;
+    - campo de valor: teclado numérico e máscara de centavos (digita só números,
+      a vírgula fica fixa com 2 casas: 1 -> 0,01 | 1250 -> 12,50)."""
     components.html(f"""
     <script>
+    const doc = window.parent.document;
+    function formatarCentavos(txt) {{
+        const dig = txt.replace(/\\D/g, '');
+        if (!dig) return '';
+        const c = parseInt(dig, 10);
+        return Math.floor(c / 100) + ',' + String(c % 100).padStart(2, '0');
+    }}
     function ajustar() {{
-        const doc = window.parent.document;
-        const campos = doc.querySelectorAll('input[aria-label="{aria_label}"]');
-        campos.forEach(el => el.setAttribute('inputmode', 'decimal'));
+        doc.querySelectorAll('div[data-baseweb="select"] input').forEach(el => {{
+            el.readOnly = true;
+            el.setAttribute('inputmode', 'none');
+            el.style.caretColor = 'transparent';
+            el.style.cursor = 'pointer';
+        }});
+        doc.querySelectorAll('input[aria-label="{aria_label_valor}"]').forEach(el => {{
+            el.setAttribute('inputmode', 'numeric');
+            if (el.dataset.mascara) return;
+            el.dataset.mascara = '1';
+            el.addEventListener('input', () => {{
+                const novo = formatarCentavos(el.value);
+                if (novo === el.value) return;
+                const setter = Object.getOwnPropertyDescriptor(
+                    window.parent.HTMLInputElement.prototype, 'value').set;
+                setter.call(el, novo);
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }});
+        }});
     }}
     ajustar();
-    const obs = new MutationObserver(ajustar);
-    obs.observe(window.parent.document.body, {{childList: true, subtree: true}});
+    new MutationObserver(ajustar).observe(doc.body, {{ childList: true, subtree: true }});
     </script>
     """, height=0)
 
@@ -594,9 +618,9 @@ with aba_lancar:
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
 
-            ativar_teclado_numerico("valor (R$)")
+            ativar_campos_formulario("valor (R$)")
 
-            enviado = st.form_submit_button("registrar gasto", use_container_width=True)
+            enviado = st.form_submit_button("registrar despesa", use_container_width=True)
 
             if enviado:
                 valor = parse_valor(valor_txt)
