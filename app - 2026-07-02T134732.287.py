@@ -492,11 +492,11 @@ def render_cards_limite(df_mes, limite_mensal):
     html = (
         "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
         "<div style='display:grid;grid-template-columns:1fr 1fr;align-items:end;column-gap:12px;'>"
-        "<div style='text-align:left;'>"
+        "<div style='justify-self:start;text-align:center;'>"
         "<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>total da fatura (R&#36;)</div>"
         f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{total_gasto:.0f}</div>"
         "</div>"
-        "<div style='text-align:right;'>"
+        "<div style='justify-self:end;text-align:center;'>"
         f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{label_disp.replace('$', '&#36;')}</div>"
         f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
         "</div></div>"
