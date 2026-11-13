@@ -484,21 +484,21 @@ def render_cards_limite(df_mes, limite_mensal):
     elif pct_fatura > pct_mes:
         cor_fatura, status = "#E5B800", "acima do ritmo do mês"
     else:
-        cor_fatura, status = "#1D9E75", "dentro do ritmo do mês"
+        cor_fatura, status = "#6b7280", "dentro do ritmo do mês"
 
     label_disp = "limite disponível (R$)" if disponivel >= 0 else "limite excedido (R$)"
     cor_disp = "inherit" if disponivel >= 0 else "#e05252"
 
     html = (
         "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;align-items:end;column-gap:12px;'>"
         "<div style='text-align:left;'>"
-        "<div style='font-size:13px;color:rgba(250,250,250,0.6);'>total da fatura (R&#36;)</div>"
-        f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;'>{total_gasto:.0f}</div>"
+        "<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>total da fatura (R&#36;)</div>"
+        f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{total_gasto:.0f}</div>"
         "</div>"
         "<div style='text-align:right;'>"
-        f"<div style='font-size:13px;color:rgba(250,250,250,0.6);'>{label_disp.replace('$', '&#36;')}</div>"
-        f"<div style='font-size:2.25rem;font-weight:600;line-height:1.2;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
+        f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{label_disp.replace('$', '&#36;')}</div>"
+        f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{cor_disp};'>{abs(disponivel):.0f}</div>"
         "</div></div>"
         + _barra_html(
             ICONE_CARTAO,
