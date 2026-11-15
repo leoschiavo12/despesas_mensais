@@ -35,7 +35,7 @@ st.markdown("""
                 margin-top: 1.2rem !important;
             }
         }
-        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-mes_fies_box, .st-key-pj_ano_box, .st-key-sim_box) {
+        :is(.st-key-cfg_metas_box, .st-key-cfg_pj_box, .st-key-pj_comp_box, .st-key-pj_fies_box, .st-key-mes_fies_box, .st-key-pj_ano_box, .st-key-sim_box, [class*='st-key-pj_ano_box_']) {
             padding: 0.9rem 1rem !important; border-color: rgba(250,250,250,0.12) !important;
         }
         :is(.st-key-cfg_area, .st-key-pj_area, .st-key-cfg_pj_area) [data-testid="stVerticalBlock"] { gap: 0.35rem !important; }
@@ -4522,48 +4522,24 @@ if _pagina == "simulador":
 # ── Aba PJ: faturamento da empresa → receita da pessoa física ────────────────
 MESES3 = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
 
-@st.dialog("lançar nota fiscal ou reembolso")
-def dialogo_nova_nota():
-    tipo = st.segmented_control("tipo", NOTA_TIPOS, default="nota fiscal", key="nn_tipo") or "nota fiscal"
-    c1, c2 = st.columns(2)
-    data = c1.date_input("data de emissão" if tipo == "nota fiscal" else "data do recebimento",
-                         value="today", format="DD/MM/YYYY", key="nn_data")
-    valor_txt = c2.text_input("valor (R$)", placeholder="ex.: 12.520,00", key="nn_valor")
-    receb = "mês seguinte" if tipo == "nota fiscal" else ""
-    desc = st.text_input("descrição (opcional)", key="nn_desc")
-    if st.button("lançar", type="primary", key="nn_ok"):
-        try:
-            valor = _num_br(valor_txt)
-            if valor <= 0:
-                raise ValueError
-        except ValueError:
-            st.error("valor inválido — use o formato 12.520,00")
-            return
-        _d = pd.Timestamp(data).normalize()
-        _notas = list(st.session_state.get("_pj_notas") or [])
-        salvar_pj_notas(_notas + [{"tipo": tipo, "data": _d, "valor": float(valor),
-                                   "recebimento": receb, "descricao": desc.strip()}])
-        _caixa = _d + pd.DateOffset(months=1) if receb == "mês seguinte" else _d
-        st.session_state["_nn_msg"] = (f"{tipo} de {formatar_brl(valor)} "
-                                       f"{'lançado' if tipo == 'reembolso' else 'lançada'} · entra no caixa de "
-                                       f"{MESES3[_caixa.month - 1]}/{str(_caixa.year)[2:]}")
-        for _k in ["nn_valor", "nn_desc"]:
-            st.session_state.pop(_k, None)
-        st.rerun()
-
 def carregar_dados_pj():
     """parâmetros, histórico e notas/reembolsos (cache na sessão) — usados em cashflow e configurações"""
     if "_pj_par" not in st.session_state:
         st.session_state["_pj_par"] = ler_pj_parametros()
     if "_pj_hist" not in st.session_state:
         st.session_state["_pj_hist"] = ler_pj_param_hist()
+    if _time.time() - st.session_state.get("_pj_notas_ts", 0) > 60:
+        st.session_state.pop("_pj_notas", None)
     if "_pj_notas" not in st.session_state:
+        st.session_state["_pj_notas_ts"] = _time.time()
         _n = ler_pj_notas()
         if _n is None:                                   # aba ainda não existe: migra o formato antigo
             _n = migrar_para_notas(st.session_state["_pj_par"])
         st.session_state["_pj_notas"] = _n
     _fs, _re = resumo_notas(st.session_state["_pj_notas"])
     return (st.session_state["_pj_par"], st.session_state["_pj_hist"], _fs, _re)
+
+FLUXO_INICIO = "2026-12"      # primeiro mês com histórico no fluxo
 
 def investido_por_mes():
     """{'2026-11': compras − vendas da carteira no mês} — lê os lançamentos (cache da sessão)"""
@@ -4680,48 +4656,16 @@ def _pagina_pj():
     # seleção (mês exibido) na sessão; setas ‹ › no topo; ano inteiro no fim
     if "pj_ref" not in st.session_state:
         st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
-        st.session_state["pj_modo_ano"] = False
-    _ref_min, _ref_max = f"{min(_anos)}-01", f"{max(_anos)}-12"
+    _ref_min, _ref_max = max(f"{min(_anos)}-01", FLUXO_INICIO), f"{max(_anos)}-12"
     if not (_ref_min <= st.session_state["pj_ref"] <= _ref_max):
         st.session_state["pj_ref"] = _prox_pj.strftime("%Y-%m")
 
-    _lay_pj = st.container(key="pj_layout")
-    col_comp, col_lado = _lay_pj.columns([1, 1], gap="large")
-    with col_comp:
-        # ‹ mês › no topo: as setas passam de um mês para o outro (e de um ano para o outro)
-        def _pj_mover(delta):
-            _ts = pd.Timestamp(f"{st.session_state['pj_ref']}-01") + pd.DateOffset(months=delta)
-            st.session_state["pj_ref"] = _ts.strftime("%Y-%m")
-            st.session_state["pj_ano_sel"] = _ts.year
-            st.session_state["pj_modo_ano"] = False
-        def _pj_ano_mudou():
-            _a = st.session_state.get("pj_ano_sel")
-            if _a:
-                st.session_state["pj_ref"] = f"{_a}-{st.session_state['pj_ref'][5:]}"
-        def _pj_alterna_ano():
-            st.session_state["pj_modo_ano"] = not st.session_state.get("pj_modo_ano")
-        st.session_state.setdefault("pj_ano_sel", int(st.session_state["pj_ref"][:4]))
-        with st.container(horizontal=True, vertical_alignment="center", key="pj_setas"):
-            st.button("‹", key="pj_ant", type="tertiary", on_click=_pj_mover, args=(-1,),
-                      disabled=st.session_state["pj_ref"] <= _ref_min)
-            _ph_tit = st.empty()
-            st.button("›", key="pj_prox", type="tertiary", on_click=_pj_mover, args=(1,),
-                      disabled=st.session_state["pj_ref"] >= _ref_max)
-        _ph_tab = st.container()
-
-    _ano = int(st.session_state["pj_ref"][:4])
-    _mes_num = 0 if st.session_state.get("pj_modo_ano") else int(st.session_state["pj_ref"][5:])
-
-    _fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, _ano)
-    _meses, _comp, _calc, _cart = _fx["meses"], _fx["comp"], _fx["calc"], _fx["cart"]
-    _das_seg, _cart_erro = _fx["das_seg"], _fx["cart_erro"]
-    _fat_de, _extra_de = _fx["fat_de"], _fx["extra_de"]
     _rot  = lambda k: f"{_MES3[int(k[5:]) - 1]}/{k[2:4]}"
     _neg  = lambda v: f"({formatar_brl(abs(v))})" if v < 0 else formatar_brl(v)
-    if _cart_erro:
-        st.warning(f"Controle de Fatura indisponível ({_cart_erro}) — cartão considerado R$0.")
+    _MES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
+                'setembro','outubro','novembro','dezembro']
 
-    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix, pix_out, investido):
+    def _tabela_pj(c, fat, extra, r_fat, r_extra, r_das, r_cart, r_pix, pix_out, investido, divs, r_saldo):
         """PJ: débitos e créditos. PF: entradas e saídas, cada grupo do maior para o menor, e o saldo"""
         lin = [("pj-sec", "PJ", ""), ("", f"(+) {r_fat}", formatar_brl(fat))]
         if extra:
@@ -4734,66 +4678,102 @@ def _pagina_pj():
                 ("pj-esp", "", ""),
                 ("pj-sec", "PF", "")]
         ent = sorted([("pró-labore líquido", c["pl_liq"]), ("lucros distribuídos", c["lucros"]),
-                      ("reembolsos", c["reembolso"]), (f"entradas {r_pix}", c["pix_in"])],
+                      ("reembolsos", c["reembolso"]), (f"entradas {r_pix}", c["pix_in"]),
+                      ("dividendos recebidos", divs)],
                      key=lambda x: -x[1])
         sai = sorted([("FIES / débito BB", c["fies"]), (r_cart, c["cartao"]),
                       (f"saídas {r_pix}", pix_out), ("total investido", investido)],
                      key=lambda x: -x[1])
         lin += [("", f"(+) {r}", _neg(v)) for r, v in ent]
         lin += [("", f"(−) {r}", _neg(v)) for r, v in sai]
-        lin.append(("pj-tot", "saldo do mês", _neg(sum(v for _, v in ent) - sum(v for _, v in sai))))
+        lin.append(("pj-tot", r_saldo, _neg(sum(v for _, v in ent) - sum(v for _, v in sai))))
         return "<table class='pj-tab'>" + "".join(
             f"<tr class='{cl}'><td>{x}</td><td>{y}</td></tr>" for cl, x, y in lin) + "</table>"
 
-    # PIX (saídas só para registro) e total investido em cada mês de caixa
-    _pix_out = {k: float(_fx["pix"].get(k, {}).get("saida", 0.0)) for k in _meses}
+    # dividendos recebidos por mês: histórico gravado (dividendos_mensais) + mês em curso ao vivo
+    _divs_mes = {}
+    try:
+        _dm = ler_dividendos_mensais()
+        _divs_mes = {str(r["ano_mes"]): float(r["valor_mes"] or 0) for _, r in _dm.iterrows()}
+    except Exception:
+        pass
+    _k_hoje = _hoje_pj.strftime("%Y-%m")
+    if _k_hoje not in _divs_mes:
+        try:
+            _df_l = st.session_state.get("_df_lanc_raw_cached")
+            if _df_l is None:
+                _df_l = ler_lancamentos()
+            _dv, _ = calcular_dividendos_mes(_df_l.to_dict(orient="records"), _hoje_pj.month, _hoje_pj.year)
+            _divs_mes[_k_hoje] = float(_dv or 0.0)
+        except Exception:
+            pass
     _inv_mes = investido_por_mes()
-    _inv = {k: _inv_mes.get(k, 0.0) for k in _meses}
 
-    # ── composição de um mês ─────────────────────────────────────────────────
-    with col_comp:
-        _MES_EXT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
-                    'setembro','outubro','novembro','dezembro']
-        if _mes_num:
-            _mes_sel = f"{_ano}-{_mes_num:02d}"
-            _tit = _MES_EXT[_mes_num - 1] + ("" if _ano == _hoje_pj.year else f" {_ano}")
-            c = _calc[_mes_sel]
-            _ca = _comp[_mes_sel]
-            _tab = _tabela_pj(
-                c, _fat_de(_ca), _extra_de(_mes_sel),
-                f"faturamento de {_rot(_ca)}", f"extra de {_rot(_mes_sel)}",
-                f"DAS (notas de {_rot(_ca)})" if _das_seg else "DAS",
-                f"fatura de {_rot(_ca)} ({_cart[_mes_sel][1]})", f"PIX de {_rot(_mes_sel)}",
-                _pix_out[_mes_sel], _inv[_mes_sel])
-        else:
-            # ano inteiro: soma dos 12 meses de recebimento
-            _tit = str(_ano)
-            c = {f: sum(v[f] for v in _calc.values()) for f in
-                 ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
-                  "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "pix_in", "sobra"]}
-            _tab = _tabela_pj(c, sum(_fat_de(_comp[k]) for k in _meses), sum(_extra_de(k) for k in _meses),
-                              "faturamento recebido", "extras", "DAS", "cartão", "PIX",
-                              sum(_pix_out.values()), sum(_inv.values()))
-        _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_tit}</p>", unsafe_allow_html=True)
-        with _ph_tab:
-            with st.container(key="pj_comp_box", border=True):
-                st.markdown(_tab, unsafe_allow_html=True)
-            if _mes_num and c["lucros"] < 0:
-                st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
+    def _dados_ano(ano):
+        """cálculos de um ano de caixa: fluxo PJ → PF + PIX, total investido e dividendos por mês"""
+        fx = fluxo_caixa_ano(_par, _hist_pj, _fat_salvo, _reemb_extra, ano)
+        fx["pix_out"] = {k: float(fx["pix"].get(k, {}).get("saida", 0.0)) for k in fx["meses"]}
+        fx["inv"] = {k: _inv_mes.get(k, 0.0) for k in fx["meses"]}
+        fx["divs"] = {k: _divs_mes.get(k, 0.0) for k in fx["meses"]}
+        return fx
 
-    # ── lado: nova nota e seleção do ano ─────────────────────────────────────
-    col_lado.markdown("<div style='height:2.6rem'></div>", unsafe_allow_html=True)
-    if st.session_state.get("_nn_msg"):
-        st.toast(st.session_state.pop("_nn_msg"))
-    if col_lado.button("+ nota fiscal / reembolso", type="primary", key="btn_nova_nota"):
-        dialogo_nova_nota()
-    with col_lado.expander("ano"):
-        st.segmented_control("ano", _anos, label_visibility="collapsed", key="pj_ano_sel",
-                             on_change=_pj_ano_mudou)
-        _modo_ano = bool(st.session_state.get("pj_modo_ano"))
-        st.button("ano inteiro", key="pj_btn_ano", on_click=_pj_alterna_ano,
-                  type="primary" if _modo_ano else "secondary")
+    def _render_mensal():
+        def _pj_mover(delta):
+            _ts = pd.Timestamp(f"{st.session_state['pj_ref']}-01") + pd.DateOffset(months=delta)
+            st.session_state["pj_ref"] = _ts.strftime("%Y-%m")
+        with st.container(horizontal=True, vertical_alignment="center", key="pj_setas"):
+            st.button("‹", key="pj_ant", type="tertiary", on_click=_pj_mover, args=(-1,),
+                      disabled=st.session_state["pj_ref"] <= _ref_min)
+            _ph_tit = st.empty()
+            st.button("›", key="pj_prox", type="tertiary", on_click=_pj_mover, args=(1,),
+                      disabled=st.session_state["pj_ref"] >= _ref_max)
+        _ano = int(st.session_state["pj_ref"][:4])
+        _mes_sel = st.session_state["pj_ref"]
+        fx = _dados_ano(_ano)
+        if fx["cart_erro"]:
+            st.warning(f"Controle de Fatura indisponível ({fx['cart_erro']}) — cartão considerado R$0.")
+        c, _ca = fx["calc"][_mes_sel], fx["comp"][_mes_sel]
+        _tab = _tabela_pj(
+            c, fx["fat_de"](_ca), fx["extra_de"](_mes_sel),
+            f"faturamento de {_rot(_ca)}", f"extra de {_rot(_mes_sel)}",
+            f"DAS (notas de {_rot(_ca)})" if fx["das_seg"] else "DAS",
+            f"fatura de {_rot(_ca)} ({fx['cart'][_mes_sel][1]})", f"PIX de {_rot(_mes_sel)}",
+            fx["pix_out"][_mes_sel], fx["inv"][_mes_sel], fx["divs"][_mes_sel], "saldo do mês")
+        _mn = int(_mes_sel[5:])
+        _ph_tit.markdown(f"<p class='cfg-sec pj-mes-lbl'>{_MES_EXT[_mn - 1]}"
+                         f"{'' if _ano == _hoje_pj.year else f' {_ano}'}</p>", unsafe_allow_html=True)
+        with st.container(key="pj_comp_box", border=True):
+            st.markdown(_tab, unsafe_allow_html=True)
+        if c["lucros"] < 0:
+            st.warning("faturamento abaixo dos custos — não sobra lucro para distribuir neste mês.")
 
+    def _render_ano(ano):
+        """resumo anual: soma dos 12 meses de caixa do ano"""
+        fx = _dados_ano(ano)
+        _m = fx["meses"]
+        c = {f: sum(fx["calc"][k][f] for k in _m) for f in
+             ["das", "prev", "contador", "taxa", "fies", "pro_labore", "lucros",
+              "pl_liq", "reembolso", "receita_pf", "cartao", "pix", "pix_in", "sobra"]}
+        _tab = _tabela_pj(c, sum(fx["fat_de"](fx["comp"][k]) for k in _m), sum(fx["extra_de"](k) for k in _m),
+                          "faturamento recebido", "extras", "DAS", "faturas do cartão", "PIX",
+                          sum(fx["pix_out"].values()), sum(fx["inv"].values()), sum(fx["divs"].values()),
+                          f"saldo de {ano}")
+        st.markdown(f"<p class='cfg-sec pj-mes-lbl' style='text-align:left'>resumo de {ano}</p>",
+                    unsafe_allow_html=True)
+        with st.container(key=f"pj_ano_box_{ano}", border=True):
+            st.markdown(_tab, unsafe_allow_html=True)
+
+    # uma aba de resumo para cada ano já encerrado (a partir de 2027)
+    _anos_fechados = [a for a in range(2027, _hoje_pj.year) if a >= ANO_INICIO_PJ]
+    if _anos_fechados:
+        _abas = st.tabs(["mensal"] + [str(a) for a in reversed(_anos_fechados)])
+        with _abas[0]:
+            _render_mensal()
+        for _aba, _a in zip(_abas[1:], reversed(_anos_fechados)):
+            with _aba:
+                _render_ano(_a)
+    else:
+        _render_mensal()
 
 if _pagina == "fluxo":
     _pagina_pj()
@@ -5172,7 +5152,7 @@ if _pagina == "configurações":
     # ── faturamento por mês (editável) ───────────────────────────────────────
     with _cpj_fat:
         st.markdown("<p class='cfg-sec'>notas fiscais e reembolsos</p>", unsafe_allow_html=True)
-        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o botão na aba fluxo · aqui dá para "
+        st.markdown("<p class='cfg-nota'>para lançar uma nova, use o app de despesas (aba receitas) · aqui dá para "
                     "corrigir ou apagar</p>", unsafe_allow_html=True)
         _notas_cfg = st.session_state.get("_pj_notas", [])
         _anos_c = sorted(a for a in set([_hoje_pj.year, _hoje_pj.year + 1] + [n["data"].year for n in _notas_cfg])
