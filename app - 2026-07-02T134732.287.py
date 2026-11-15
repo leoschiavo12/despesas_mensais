@@ -798,35 +798,30 @@ with aba_pix:
 
     @st.fragment
     def form_pix():
-        tipo = st.segmented_control("tipo de pix", ["saida", "entrada"], default="saida",
-                                    format_func=lambda t: PIX_TIPOS[t], key="pix_tipo") or "saida"
-        if tipo == "saida":
-            # mesmas categorias do cartão (sem parcelamentos); padrão = a mais usada no PIX no mês anterior
-            cats = df_cat[df_cat["id"] != FIXED_ID].copy()
-            cats["nome_lower"] = cats["nome"].str.lower()
-            cats = cats.sort_values("nome_lower")
-            opcoes_ids = cats["id"].tolist()
-            opcoes_labels = dict(zip(cats["id"], cats["nome_lower"]))
-            hoje_p = date.today()
-            mes_ant_p = mes_anterior(hoje_p)
-            df_ant = filtrar_mes(df_pix_all, mes_ant_p.year, mes_ant_p.month)
-            df_ant = df_ant[df_ant["tipo"] == "saida"] if not df_ant.empty else df_ant
-            gasto_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
-            if gasto_ant:
-                cat_def = max(gasto_ant, key=gasto_ant.get)
-                index_default = opcoes_ids.index(cat_def) if cat_def in opcoes_ids else 0
-            else:
-                index_default = 0
-        else:
-            opcoes_ids = PIX_CAT_ENTRADA
-            opcoes_labels = {c: c for c in PIX_CAT_ENTRADA}
-            index_default = 0
+        # categorias: as do cartão (sem parcelamentos) e, em seguida, as de entrada
+        cats = df_cat[df_cat["id"] != FIXED_ID].copy()
+        cats["nome_lower"] = cats["nome"].str.lower()
+        cats = cats.sort_values("nome_lower")
+        opcoes_ids = cats["id"].tolist() + [c for c in PIX_CAT_ENTRADA if c not in cats["id"].tolist()]
+        opcoes_labels = {**dict(zip(cats["id"], cats["nome_lower"])), **{c: c for c in PIX_CAT_ENTRADA}}
+        # padrão = categoria mais usada nas saídas PIX do mês anterior
+        mes_ant_p = mes_anterior(date.today())
+        df_ant = filtrar_mes(df_pix_all, mes_ant_p.year, mes_ant_p.month)
+        df_ant = df_ant[df_ant["tipo"] == "saida"] if not df_ant.empty else df_ant
+        gasto_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
+        cat_def = max(gasto_ant, key=gasto_ant.get) if gasto_ant else None
+        index_default = opcoes_ids.index(cat_def) if cat_def in opcoes_ids else 0
 
-        with st.form(f"form_pix_{tipo}", clear_on_submit=True):
-            categoria_id = st.selectbox(
-                "categoria", options=opcoes_ids, index=index_default,
-                format_func=lambda x: opcoes_labels[x],
-            )
+        with st.form("form_pix", clear_on_submit=True):
+            col_tipo, col_cat = st.columns([1, 1.6])
+            with col_tipo:
+                tipo = st.selectbox("tipo", options=["saida", "entrada"], index=0,
+                                    format_func=lambda t: PIX_TIPOS[t])
+            with col_cat:
+                categoria_id = st.selectbox(
+                    "categoria", options=opcoes_ids, index=index_default,
+                    format_func=lambda x: opcoes_labels[x],
+                )
             col_data, col_val = st.columns([1, 1])
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
@@ -834,8 +829,7 @@ with aba_pix:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
             descricao = st.text_input("descrição")
             ativar_campos_formulario("valor (R$)")
-            enviado = st.form_submit_button(
-                "registrar saída" if tipo == "saida" else "registrar entrada", use_container_width=True)
+            enviado = st.form_submit_button("registrar pix", use_container_width=True)
             if enviado:
                 valor = parse_valor(valor_txt)
                 if valor <= 0:
