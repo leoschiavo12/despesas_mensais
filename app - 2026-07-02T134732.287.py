@@ -9,7 +9,8 @@ CONFIGURAÇÃO NECESSÁRIA ANTES DO DEPLOY:
 3. Nos Secrets do Streamlit Cloud, adicionar o bloco [gcp_service_account] com o JSON da
    mesma service account já usada no SmartWallet.
 4. Rodar o app uma vez — ele cria sozinho as abas 'lancamentos', 'categorias' e 'config'
-   com os cabeçalhos e categorias padrão, se ainda não existirem.
+   com os cabeçalhos e categorias padrão, se ainda não existirem. A aba 'pix' (entradas e
+   saídas via PIX) também é criada sozinha e fica fora da fatura — o SmartWallet lê dela.
 """
 
 import streamlit as st
@@ -28,6 +29,9 @@ SPREADSHEET_ID = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
 ABA_LANCAMENTOS = "lancamentos"
 ABA_CATEGORIAS = "categorias"
 ABA_CONFIG = "config"
+ABA_PIX = "pix"   # pagamentos e recebimentos via PIX — fora da fatura (não entra em lancamentos)
+PIX_TIPOS = {"saida": "saída", "entrada": "entrada"}
+PIX_CAT_ENTRADA = ["reembolso", "venda", "presente", "outros"]
 
 FIXED_ID = "parcel"
 
@@ -201,6 +205,10 @@ def garantir_abas(sh):
         for c in CATEGORIAS_PADRAO:
             ws.append_row([c["id"], c["nome"], c["cor"], c["valor_alvo"], str(c["fixo"])])
 
+    if ABA_PIX not in titulos_existentes:
+        ws = sh.add_worksheet(title=ABA_PIX, rows=1000, cols=5)
+        ws.append_row(["data", "tipo", "categoria", "descricao", "valor"])
+
     if ABA_CONFIG not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_CONFIG, rows=10, cols=2)
         ws.append_row(["chave", "valor"])
@@ -274,6 +282,42 @@ def excluir_lancamento(data_str, categoria, descricao, valor):
             ws.delete_rows(i)
             break
     recarregar_lancamentos()
+
+
+def carregar_pix():
+    """lançamentos de PIX (aba pix) — totalmente separados da fatura do cartão"""
+    if "df_pix" not in st.session_state:
+        sh = get_spreadsheet()
+        garantir_abas(sh)
+        ws = sh.worksheet(ABA_PIX)
+        df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
+        if df.empty:
+            df = pd.DataFrame(columns=["data", "tipo", "categoria", "descricao", "valor"])
+        else:
+            df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
+            df["data"] = pd.to_datetime(df["data"]).dt.date
+            df["tipo"] = df["tipo"].astype(str).str.strip().str.lower()
+        st.session_state["df_pix"] = df
+    return st.session_state["df_pix"]
+
+
+def salvar_pix(data_str, tipo, categoria, descricao, valor):
+    ws = get_spreadsheet().worksheet(ABA_PIX)
+    ws.append_row([data_str, tipo, categoria, descricao, valor])
+    st.session_state.pop("df_pix", None)
+
+
+def excluir_pix(data_str, tipo, categoria, descricao, valor):
+    """exclusão por conteúdo, como nos lançamentos do cartão"""
+    ws = get_spreadsheet().worksheet(ABA_PIX)
+    registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    for i, r in enumerate(registros, start=2):
+        if (str(r["data"]) == str(data_str) and str(r["tipo"]).strip().lower() == tipo
+                and str(r["categoria"]) == str(categoria) and str(r["descricao"]) == str(descricao)
+                and float(r["valor"]) == float(valor)):
+            ws.delete_rows(i)
+            break
+    st.session_state.pop("df_pix", None)
 
 
 def salvar_configuracoes(limite, df_categorias):
@@ -595,8 +639,8 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
             )
 
 
-aba_lancar, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["lançar", "dashboard", "histórico", "orçamento"]
+aba_lancar, aba_pix, aba_dash, aba_hist, aba_orc = st.tabs(
+    ["lançar", "pix", "dashboard", "histórico", "orçamento"]
 )
 
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
@@ -718,6 +762,129 @@ with aba_hist:
             file_name=f"fatura_{ref.year}_{ref.month:02d}.csv",
             use_container_width=True,
         )
+
+# ───────────────────────── ABA: PIX ─────────────────────────
+# entradas e saídas via PIX: ficam na aba "pix" da planilha e não entram na fatura,
+# nos gráficos, no histórico do cartão nem no resumo mensal em PDF.
+
+def render_cards_pix(df_mes):
+    """painel do mês: entradas · saídas · saldo (mesmo visual do painel da fatura)"""
+    ent = df_mes[df_mes["tipo"] == "entrada"]["valor"].sum() if not df_mes.empty else 0
+    sai = df_mes[df_mes["tipo"] == "saida"]["valor"].sum() if not df_mes.empty else 0
+    saldo = ent - sai
+    cor_saldo = "#1D9E75" if saldo >= 0 else "#e05252"
+    def bloco(rotulo, valor, cor="inherit", alinhar="start"):
+        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
+                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{cor};'>{valor}</div></div>")
+    html = (
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
+        + bloco("entradas (R&#36;)", f"{ent:.0f}", "#1D9E75", "start")
+        + bloco("saídas (R&#36;)", f"{sai:.0f}", "inherit", "center")
+        + bloco("saldo (R&#36;)", f"{'−' if saldo < 0 else ''}{abs(saldo):.0f}", cor_saldo, "end")
+        + "</div></div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+with aba_pix:
+    render_nav_mes("pix")
+    ref_pix = st.session_state["mes_ref"]
+    df_pix_all = carregar_pix()
+    df_pix_mes = filtrar_mes(df_pix_all, ref_pix.year, ref_pix.month)
+    render_cards_pix(df_pix_mes)
+    st.write("")
+
+    @st.fragment
+    def form_pix():
+        tipo = st.segmented_control("tipo de pix", ["saida", "entrada"], default="saida",
+                                    format_func=lambda t: PIX_TIPOS[t], key="pix_tipo") or "saida"
+        if tipo == "saida":
+            # mesmas categorias do cartão (sem parcelamentos); padrão = a mais usada no PIX no mês anterior
+            cats = df_cat[df_cat["id"] != FIXED_ID].copy()
+            cats["nome_lower"] = cats["nome"].str.lower()
+            cats = cats.sort_values("nome_lower")
+            opcoes_ids = cats["id"].tolist()
+            opcoes_labels = dict(zip(cats["id"], cats["nome_lower"]))
+            hoje_p = date.today()
+            mes_ant_p = mes_anterior(hoje_p)
+            df_ant = filtrar_mes(df_pix_all, mes_ant_p.year, mes_ant_p.month)
+            df_ant = df_ant[df_ant["tipo"] == "saida"] if not df_ant.empty else df_ant
+            gasto_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
+            if gasto_ant:
+                cat_def = max(gasto_ant, key=gasto_ant.get)
+                index_default = opcoes_ids.index(cat_def) if cat_def in opcoes_ids else 0
+            else:
+                index_default = 0
+        else:
+            opcoes_ids = PIX_CAT_ENTRADA
+            opcoes_labels = {c: c for c in PIX_CAT_ENTRADA}
+            index_default = 0
+
+        with st.form(f"form_pix_{tipo}", clear_on_submit=True):
+            categoria_id = st.selectbox(
+                "categoria", options=opcoes_ids, index=index_default,
+                format_func=lambda x: opcoes_labels[x],
+            )
+            col_data, col_val = st.columns([1, 1])
+            with col_data:
+                data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
+            with col_val:
+                valor_txt = st.text_input("valor (R$)", placeholder="0,00")
+            descricao = st.text_input("descrição")
+            ativar_campos_formulario("valor (R$)")
+            enviado = st.form_submit_button(
+                "registrar saída" if tipo == "saida" else "registrar entrada", use_container_width=True)
+            if enviado:
+                valor = parse_valor(valor_txt)
+                if valor <= 0:
+                    st.error("informe um valor válido.")
+                else:
+                    salvar_pix(data_lanc.isoformat(), tipo, categoria_id, descricao, valor)
+                    st.success("registrado!")
+                    st.rerun(scope="app")
+
+    form_pix()
+
+    st.write("")
+    if df_pix_mes.empty:
+        st.caption("nenhum pix neste mês.")
+    else:
+        mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
+        df_pix_ord = df_pix_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
+        for idx_row, (_, r) in enumerate(df_pix_ord.iterrows()):
+            entrada = r["tipo"] == "entrada"
+            nome_cat = (str(r["categoria"]) if entrada else mapa_nomes.get(r["categoria"], "sem categoria")).lower()
+            item_id = f"pix_{idx_row}_{r['data']}_{r['tipo']}_{r['valor']}"
+            pendente_key = f"pendente_del_{item_id}"
+            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
+            with col_desc:
+                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>"
+                            f"{'entrada' if entrada else 'saída'} · {nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>",
+                            unsafe_allow_html=True)
+            with col_acao:
+                if not st.session_state.get(pendente_key):
+                    if st.button("✕", key=f"del_{item_id}", use_container_width=True):
+                        st.session_state[pendente_key] = True
+                        st.rerun()
+            with col_val:
+                cor = "#1D9E75" if entrada else "inherit"
+                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:{cor};'>"
+                            f"{'+' if entrada else '−'} {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
+            if st.session_state.get(pendente_key):
+                st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
+                            "excluir este pix?</div>", unsafe_allow_html=True)
+                col_confirma, col_cancela = st.columns(2)
+                with col_confirma:
+                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                        excluir_pix(r["data"].isoformat(), r["tipo"], r["categoria"], r["descricao"], r["valor"])
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun(scope="app")
+                with col_cancela:
+                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun()
 
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
