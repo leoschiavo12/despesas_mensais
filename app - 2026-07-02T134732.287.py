@@ -29,9 +29,12 @@ SPREADSHEET_ID = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
 ABA_LANCAMENTOS = "lancamentos"
 ABA_CATEGORIAS = "categorias"
 ABA_CONFIG = "config"
+# notas fiscais e reembolsos da PJ ficam na planilha da carteira (SmartWallet), aba pj_notas
+CARTEIRA_SPREADSHEET_ID = st.secrets.get("carteira_spreadsheet_id", "1FiEMHBDp3UHPP3QuZXPuWsiga9SOGRlueNIC7laPTGo")
+ABA_NOTAS = "pj_notas"
+RECEITA_TIPOS = ["nota fiscal", "reembolso", "pix"]
+MESES3 = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 ABA_PIX = "pix"   # pagamentos e recebimentos via PIX — fora da fatura (não entra em lancamentos)
-PIX_TIPOS = {"saida": "saída", "entrada": "entrada"}
-PIX_CAT_ENTRADA = ["reembolso", "venda", "presente", "outros"]
 
 FIXED_ID = "parcel"
 
@@ -318,6 +321,46 @@ def excluir_pix(data_str, tipo, categoria, descricao, valor):
             ws.delete_rows(i)
             break
     st.session_state.pop("df_pix", None)
+
+
+def carregar_notas():
+    """notas fiscais e reembolsos (aba pj_notas da carteira) · None se a aba não existe"""
+    if "df_notas" not in st.session_state:
+        sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
+        if ABA_NOTAS not in [ws.title for ws in sh.worksheets()]:
+            return None
+        regs = sh.worksheet(ABA_NOTAS).get_all_records(value_render_option=ValueRenderOption.unformatted)
+        df = pd.DataFrame(regs)
+        if df.empty:
+            df = pd.DataFrame(columns=["tipo", "data", "valor", "recebimento", "descricao"])
+        else:
+            df["data_txt"] = df["data"].astype(str)
+            df["data"] = pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce").dt.date
+            df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
+            df["tipo"] = df["tipo"].astype(str).str.strip().str.lower()
+            df = df.dropna(subset=["data"])
+        st.session_state["df_notas"] = df
+    return st.session_state["df_notas"]
+
+
+def salvar_nota(tipo, data_lanc, valor, descricao):
+    """mesmo formato do SmartWallet: tipo, data dd/mm/aaaa, valor, recebimento, descrição"""
+    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    ws.append_row([tipo, data_lanc.strftime("%d/%m/%Y"), float(valor),
+                   "mês seguinte" if tipo == "nota fiscal" else "", descricao])
+    st.session_state.pop("df_notas", None)
+
+
+def excluir_nota(tipo, data_txt, valor, descricao):
+    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    regs = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    for i, r in enumerate(regs, start=2):
+        if (str(r["tipo"]).strip().lower() == tipo and str(r["data"]) == str(data_txt)
+                and abs(float(r["valor"] or 0) - float(valor)) < 0.005
+                and str(r.get("descricao", "")) == str(descricao)):
+            ws.delete_rows(i)
+            break
+    st.session_state.pop("df_notas", None)
 
 
 def salvar_configuracoes(limite, df_categorias):
@@ -639,8 +682,8 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
             )
 
 
-aba_lancar, aba_pix, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["lançar", "pix", "dashboard", "histórico", "orçamento"]
+aba_lancar, aba_receitas, aba_dash, aba_hist, aba_orc = st.tabs(
+    ["despesas", "receitas", "dashboard", "histórico", "orçamento"]
 )
 
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
@@ -671,10 +714,14 @@ with aba_lancar:
             index_default = 0
 
         with st.form("form_lancar", clear_on_submit=True):
-            categoria_id = st.selectbox(
-                "categoria", options=opcoes_ids, index=index_default,
-                format_func=lambda x: opcoes_labels[x],
-            )
+            col_pag, col_cat = st.columns([1, 1.6])
+            with col_pag:
+                pagamento = st.selectbox("pagamento", options=["cartão", "pix"], index=0)
+            with col_cat:
+                categoria_id = st.selectbox(
+                    "categoria", options=opcoes_ids, index=index_default,
+                    format_func=lambda x: opcoes_labels[x],
+                )
 
             col_data, col_val = st.columns([1, 1])
             with col_data:
@@ -693,7 +740,11 @@ with aba_lancar:
                 if valor <= 0:
                     st.error("informe um valor válido.")
                 else:
-                    salvar_lancamento(data_lanc.isoformat(), categoria_id, descricao, valor)
+                    if pagamento == "pix":
+                        # pix: aba pix (fora da fatura do cartão e dos gráficos)
+                        salvar_pix(data_lanc.isoformat(), "saida", categoria_id, descricao, valor)
+                    else:
+                        salvar_lancamento(data_lanc.isoformat(), categoria_id, descricao, valor)
                     st.success("registrado!")
                     st.rerun(scope="app")
 
@@ -714,23 +765,31 @@ with aba_hist:
     ref = st.session_state["mes_ref"]
     df_lanc = carregar_lancamentos()
     df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
+    # despesas no pix entram na mesma lista (marcadas), sem mexer nos totais da fatura
+    df_pix_h = filtrar_mes(carregar_pix(), ref.year, ref.month)
+    df_pix_h = df_pix_h[df_pix_h["tipo"] == "saida"] if not df_pix_h.empty else df_pix_h
 
-    if df_mes.empty:
+    if df_mes.empty and df_pix_h.empty:
         st.caption("nenhum lançamento neste mês.")
     else:
         # inverte a ordem original (último inserido vira o primeiro) e então
         # ordena por data de forma estável — dentro do mesmo dia, mantém o
         # último lançado em primeiro lugar, em vez da ordem de inserção crua.
-        df_mes_ordenado = df_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
+        _cart_h = df_mes.iloc[::-1].assign(pagamento="cartão")
+        _pix_h = (df_pix_h.iloc[::-1][["data", "categoria", "descricao", "valor"]].assign(pagamento="pix")
+                  if not df_pix_h.empty else df_pix_h)
+        df_mes_ordenado = pd.concat([x for x in [_cart_h, _pix_h] if not x.empty], ignore_index=True) \
+            .sort_values("data", ascending=False, kind="mergesort")
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for idx_row, (_, r) in enumerate(df_mes_ordenado.iterrows()):
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
-            item_id = f"{idx_row}_{r['data']}_{r['categoria']}_{r['valor']}"
+            eh_pix = r["pagamento"] == "pix"
+            item_id = f"{idx_row}_{r['data']}_{r['categoria']}_{r['valor']}_{r['pagamento']}"
             pendente_key = f"pendente_del_{item_id}"
 
             col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
             with col_desc:
-                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
+                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat}{' · pix' if eh_pix else ''} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
             with col_acao:
                 if not st.session_state.get(pendente_key):
                     if st.button("✕", key=f"del_{item_id}", use_container_width=True):
@@ -747,7 +806,10 @@ with aba_hist:
                 col_confirma, col_cancela = st.columns(2)
                 with col_confirma:
                     if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                        excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
+                        if eh_pix:
+                            excluir_pix(r["data"].isoformat(), "saida", r["categoria"], r["descricao"], r["valor"])
+                        else:
+                            excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
                         st.session_state.pop(pendente_key, None)
                         st.rerun(scope="app")
                 with col_cancela:
@@ -755,7 +817,7 @@ with aba_hist:
                         st.session_state.pop(pendente_key, None)
                         st.rerun()
 
-        csv = df_mes_ordenado.rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
+        csv = df_mes_ordenado[["data", "categoria", "descricao", "valor", "pagamento"]].rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
         st.download_button(
             "↓ exportar histórico (csv)",
             csv.to_csv(index=False, sep=";").encode("utf-8-sig"),
@@ -763,65 +825,47 @@ with aba_hist:
             use_container_width=True,
         )
 
-# ───────────────────────── ABA: PIX ─────────────────────────
-# entradas e saídas via PIX: ficam na aba "pix" da planilha e não entram na fatura,
-# nos gráficos, no histórico do cartão nem no resumo mensal em PDF.
+# ───────────────────────── ABA: RECEITAS ─────────────────────────
+# nota fiscal e reembolso → aba pj_notas da carteira (SmartWallet calcula o fluxo PJ → PF);
+# pix → aba pix desta planilha (tipo entrada), fora da fatura do cartão.
 
-def render_cards_pix(df_mes):
-    """painel do mês: entradas · saídas · saldo (mesmo visual do painel da fatura)"""
-    ent = df_mes[df_mes["tipo"] == "entrada"]["valor"].sum() if not df_mes.empty else 0
-    sai = df_mes[df_mes["tipo"] == "saida"]["valor"].sum() if not df_mes.empty else 0
-    saldo = ent - sai
-    cor_saldo = "#1D9E75" if saldo >= 0 else "#e05252"
-    def bloco(rotulo, valor, cor="inherit", alinhar="start"):
+def render_cards_receitas(notas_mes, reemb_mes, pix_mes):
+    """painel do mês: notas fiscais · reembolsos · pix (mesmo visual do painel da fatura)"""
+    def bloco(rotulo, valor, alinhar):
         return (f"<div style='justify-self:{alinhar};text-align:center;'>"
                 f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
-                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;color:{cor};'>{valor}</div></div>")
-    html = (
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
+    st.markdown(
         "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
         "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
-        + bloco("entradas (R&#36;)", f"{ent:.0f}", "#1D9E75", "start")
-        + bloco("saídas (R&#36;)", f"{sai:.0f}", "inherit", "center")
-        + bloco("saldo (R&#36;)", f"{'−' if saldo < 0 else ''}{abs(saldo):.0f}", cor_saldo, "end")
-        + "</div></div>"
-    )
-    st.markdown(html, unsafe_allow_html=True)
+        + bloco("notas fiscais (R&#36;)", notas_mes, "start") + bloco("reembolsos (R&#36;)", reemb_mes, "center")
+        + bloco("pix (R&#36;)", pix_mes, "end") + "</div></div>", unsafe_allow_html=True)
 
 
-with aba_pix:
-    render_nav_mes("pix")
-    ref_pix = st.session_state["mes_ref"]
-    df_pix_all = carregar_pix()
-    df_pix_mes = filtrar_mes(df_pix_all, ref_pix.year, ref_pix.month)
-    render_cards_pix(df_pix_mes)
+with aba_receitas:
+    render_nav_mes("rec")
+    ref_rec = st.session_state["mes_ref"]
+    try:
+        df_notas = carregar_notas()
+        erro_notas = None if df_notas is not None else "abra o SmartWallet uma vez para criar a aba pj_notas."
+    except Exception as e:
+        df_notas, erro_notas = None, f"planilha da carteira indisponível ({str(e)[:60]})"
+    df_notas_mes = (filtrar_mes(df_notas, ref_rec.year, ref_rec.month)
+                    if df_notas is not None and not df_notas.empty else pd.DataFrame())
+    df_pix_rec = filtrar_mes(carregar_pix(), ref_rec.year, ref_rec.month)
+    df_pix_rec = df_pix_rec[df_pix_rec["tipo"] == "entrada"] if not df_pix_rec.empty else df_pix_rec
+
+    _soma = lambda d, t: float(d[d["tipo"] == t]["valor"].sum()) if not d.empty else 0.0
+    render_cards_receitas(_soma(df_notas_mes, "nota fiscal"), _soma(df_notas_mes, "reembolso"),
+                          float(df_pix_rec["valor"].sum()) if not df_pix_rec.empty else 0.0)
+    if erro_notas:
+        st.warning(erro_notas)
     st.write("")
 
     @st.fragment
-    def form_pix():
-        # categorias: as do cartão (sem parcelamentos) e, em seguida, as de entrada
-        cats = df_cat[df_cat["id"] != FIXED_ID].copy()
-        cats["nome_lower"] = cats["nome"].str.lower()
-        cats = cats.sort_values("nome_lower")
-        opcoes_ids = cats["id"].tolist() + [c for c in PIX_CAT_ENTRADA if c not in cats["id"].tolist()]
-        opcoes_labels = {**dict(zip(cats["id"], cats["nome_lower"])), **{c: c for c in PIX_CAT_ENTRADA}}
-        # padrão = categoria mais usada nas saídas PIX do mês anterior
-        mes_ant_p = mes_anterior(date.today())
-        df_ant = filtrar_mes(df_pix_all, mes_ant_p.year, mes_ant_p.month)
-        df_ant = df_ant[df_ant["tipo"] == "saida"] if not df_ant.empty else df_ant
-        gasto_ant = df_ant.groupby("categoria")["valor"].sum().to_dict() if not df_ant.empty else {}
-        cat_def = max(gasto_ant, key=gasto_ant.get) if gasto_ant else None
-        index_default = opcoes_ids.index(cat_def) if cat_def in opcoes_ids else 0
-
-        with st.form("form_pix", clear_on_submit=True):
-            col_tipo, col_cat = st.columns([1, 1.6])
-            with col_tipo:
-                tipo = st.selectbox("tipo", options=["saida", "entrada"], index=0,
-                                    format_func=lambda t: PIX_TIPOS[t])
-            with col_cat:
-                categoria_id = st.selectbox(
-                    "categoria", options=opcoes_ids, index=index_default,
-                    format_func=lambda x: opcoes_labels[x],
-                )
+    def form_receita():
+        with st.form("form_receita", clear_on_submit=True):
+            tipo = st.selectbox("tipo", options=RECEITA_TIPOS, index=0)
             col_data, col_val = st.columns([1, 1])
             with col_data:
                 data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
@@ -829,56 +873,71 @@ with aba_pix:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
             descricao = st.text_input("descrição")
             ativar_campos_formulario("valor (R$)")
-            enviado = st.form_submit_button("registrar pix", use_container_width=True)
+            enviado = st.form_submit_button("registrar receita", use_container_width=True)
             if enviado:
                 valor = parse_valor(valor_txt)
                 if valor <= 0:
                     st.error("informe um valor válido.")
-                else:
-                    salvar_pix(data_lanc.isoformat(), tipo, categoria_id, descricao, valor)
+                elif tipo == "pix":
+                    salvar_pix(data_lanc.isoformat(), "entrada", "receita", descricao, valor)
                     st.success("registrado!")
                     st.rerun(scope="app")
+                elif erro_notas:
+                    st.error(erro_notas)
+                else:
+                    salvar_nota(tipo, data_lanc, valor, descricao)
+                    if tipo == "nota fiscal":       # nota é recebida (e paga DAS) no mês seguinte
+                        cx = date(data_lanc.year + (data_lanc.month == 12), data_lanc.month % 12 + 1, 1)
+                        st.success(f"registrada! entra no caixa de {MESES3[cx.month - 1]}/{str(cx.year)[2:]}")
+                    else:
+                        st.success("registrado!")
+                    st.rerun(scope="app")
 
-    form_pix()
-
+    form_receita()
     st.write("")
-    if df_pix_mes.empty:
-        st.caption("nenhum pix neste mês.")
-    else:
-        mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
-        df_pix_ord = df_pix_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
-        for idx_row, (_, r) in enumerate(df_pix_ord.iterrows()):
-            entrada = r["tipo"] == "entrada"
-            nome_cat = (str(r["categoria"]) if entrada else mapa_nomes.get(r["categoria"], "sem categoria")).lower()
-            item_id = f"pix_{idx_row}_{r['data']}_{r['tipo']}_{r['valor']}"
-            pendente_key = f"pendente_del_{item_id}"
-            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
-            with col_desc:
-                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>"
-                            f"{'entrada' if entrada else 'saída'} · {nome_cat} · {r['data'].strftime('%d/%m/%y')}</span>",
-                            unsafe_allow_html=True)
-            with col_acao:
-                if not st.session_state.get(pendente_key):
-                    if st.button("✕", key=f"del_{item_id}", use_container_width=True):
-                        st.session_state[pendente_key] = True
-                        st.rerun()
-            with col_val:
-                cor = "#1D9E75" if entrada else "inherit"
-                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:{cor};'>"
-                            f"{'+' if entrada else '−'} {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
-            if st.session_state.get(pendente_key):
-                st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
-                            "excluir este pix?</div>", unsafe_allow_html=True)
-                col_confirma, col_cancela = st.columns(2)
-                with col_confirma:
-                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                        excluir_pix(r["data"].isoformat(), r["tipo"], r["categoria"], r["descricao"], r["valor"])
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun(scope="app")
-                with col_cancela:
-                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun()
+
+    itens = []
+    if not df_notas_mes.empty:
+        for _, r in df_notas_mes.iterrows():
+            itens.append({"origem": "nota", "tipo": r["tipo"], "data": r["data"], "valor": r["valor"],
+                          "descricao": str(r.get("descricao", "") or ""), "data_txt": r["data_txt"]})
+    if not df_pix_rec.empty:
+        for _, r in df_pix_rec.iloc[::-1].iterrows():
+            itens.append({"origem": "pix", "tipo": "pix", "data": r["data"], "valor": r["valor"],
+                          "descricao": str(r.get("descricao", "") or ""), "categoria": r["categoria"]})
+    if not itens:
+        st.caption("nenhuma receita neste mês.")
+    for idx_row, it in enumerate(sorted(itens, key=lambda x: x["data"], reverse=True)):
+        item_id = f"rec_{idx_row}_{it['data']}_{it['tipo']}_{it['valor']}"
+        pendente_key = f"pendente_del_{item_id}"
+        col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
+        with col_desc:
+            st.markdown(f"**{it['descricao'] or it['tipo']}**  \n<span style='color:#888;font-size:12px;'>"
+                        f"{it['tipo']} · {it['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
+        with col_acao:
+            if not st.session_state.get(pendente_key):
+                if st.button("✕", key=f"del_{item_id}", use_container_width=True):
+                    st.session_state[pendente_key] = True
+                    st.rerun()
+        with col_val:
+            st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:#1D9E75;'>"
+                        f"+ {formatar_brl(it['valor'])}</div>", unsafe_allow_html=True)
+        if st.session_state.get(pendente_key):
+            st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
+                        "excluir esta receita?</div>", unsafe_allow_html=True)
+            col_confirma, col_cancela = st.columns(2)
+            with col_confirma:
+                if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                    if it["origem"] == "pix":
+                        excluir_pix(it["data"].isoformat(), "entrada", it["categoria"], it["descricao"], it["valor"])
+                    else:
+                        excluir_nota(it["tipo"], it["data_txt"], it["valor"], it["descricao"])
+                    st.session_state.pop(pendente_key, None)
+                    st.rerun(scope="app")
+            with col_cancela:
+                if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                    st.session_state.pop(pendente_key, None)
+                    st.rerun()
 
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
