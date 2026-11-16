@@ -453,22 +453,34 @@ def carregar_investimentos():
 
 
 def carregar_ativos():
-    """[(ativo, classe)] para o formulário: o que já foi lançado + ativos_info + BTC e Renda+ 2050"""
+    """[(ativo, classe)] para o formulário: só o que está em carteira (posição > 0), mais BTC,
+    Renda+ 2050 e os ativos cadastrados que ainda não têm lançamento. quem foi vendido por
+    inteiro sai da lista (volta por "+ novo ativo")"""
     if "ativos_invest" not in st.session_state:
-        ativos = {}
+        info = {}
         ws = _ws_carteira(ABA_ATIVOS)
         if ws is not None:
             for r in ws.get_all_values()[1:]:
                 if r and r[0].strip() and len(r) > 1 and r[1].strip():
-                    ativos[r[0].strip().upper()] = r[1].strip()
+                    info[r[0].strip().upper()] = r[1].strip()
         df = carregar_investimentos()
+        classes, posicao = {}, {}
         for _, r in df.iterrows():
-            if r["ativo"] and r["classe"]:
-                ativos[r["ativo"]] = r["classe"]
+            if not r["ativo"]:
+                continue
+            if r["classe"]:
+                classes[r["ativo"]] = r["classe"]
+            sinal = 1 if r["tipo"] == "compra" else (-1 if r["tipo"] == "venda" else 0)
+            posicao[r["ativo"]] = posicao.get(r["ativo"], 0.0) + sinal * r["quantidade"]
+        extras = st.session_state.get("ativos_extra", set())
+        ativos = {a: classes.get(a) or info.get(a) for a, q in posicao.items() if q > 1e-9}
+        ativos.update({a: c for a, c in info.items() if a not in posicao or a in extras})
         for a, c in ATIVOS_FIXOS:
             ativos.setdefault(a, c)
+        ativos = {a: c for a, c in ativos.items() if c}
         ordem = {"ETF": 0, "FII": 1, "Cripto": 2, "Tesouro Direto": 3}
         st.session_state["ativos_invest"] = sorted(ativos.items(), key=lambda x: (ordem.get(x[1], 9), x[0]))
+        st.session_state["ativos_todos"] = {**info, **classes}
     return st.session_state["ativos_invest"]
 
 
@@ -502,9 +514,17 @@ def excluir_investimento(data_lanc, tipo, ativo, qtd, total):
 
 
 def salvar_ativo_novo(ativo, classe, tipo, indexador, pais):
-    """cadastra o ativo na aba ativos_info da carteira (classificação usada pelo SmartWallet)"""
+    """cadastra (ou atualiza) o ativo na aba ativos_info da carteira — classificação usada pelo SmartWallet"""
     ws = _ws_carteira(ABA_ATIVOS, ["ativo", "classe", "tipo", "indexador", "pais"])
-    ws.append_row([ativo, classe, tipo or "", indexador or "", pais or ""])
+    nova = [ativo, classe, tipo or "", indexador or "", pais or ""]
+    for i, r in enumerate(ws.get_all_values()[1:], start=2):
+        if r and r[0].strip().upper() == ativo:
+            ws.update(range_name=f"A{i}:E{i}", values=[nova])
+            break
+    else:
+        ws.append_row(nova)
+    # ativo que já teve lançamentos (vendido por inteiro) volta para a lista nesta sessão
+    st.session_state["ativos_extra"] = st.session_state.get("ativos_extra", set()) | {ativo}
     _limpar_invest()
 
 
@@ -1121,8 +1141,12 @@ def dialogo_receita(item=None, erro_notas=None):
                 _fechar("registrado!")
 
 
-@st.dialog("investimento")
+@st.dialog("aporte")
 def dialogo_investimento(df_inv, ativos_inv, item=None):
+    ativos_inv = list(ativos_inv)
+    if item and item["ativo"] not in dict(ativos_inv):
+        ativos_inv.append((item["ativo"], item.get("classe") or
+                           st.session_state.get("ativos_todos", {}).get(item["ativo"], "")))
     nomes = [a for a, _ in ativos_inv]
     classes = dict(ativos_inv)
     preco_ini = _txt_valor(item["preco"]) if item else ""
@@ -1144,7 +1168,7 @@ def dialogo_investimento(df_inv, ativos_inv, item=None):
                                     placeholder="ex.: 10")
         preco_txt = st.text_input("preço unitário (R$)", value=preco_ini, placeholder="0,00")
         ativar_campos_formulario("preço unitário (R$)")
-        enviado = st.form_submit_button("salvar" if item else "registrar investimento", use_container_width=True)
+        enviado = st.form_submit_button("salvar" if item else "registrar aporte", use_container_width=True)
         if enviado:
             qtd = _num_br(qtd_txt) or 0.0
             # preço não mexido na edição: mantém o original (pode ter mais de 2 casas)
@@ -1217,7 +1241,7 @@ with aba_lancar:
     render_cards_limite(df_mes, limite_mensal, ref)
     st.write("")
     with st.container(key="novo_despesa"):
-        if st.button("+ despesa", use_container_width=True):
+        if st.button("+ nova despesa", use_container_width=True):
             dialogo_despesa()
     st.write("")
 
@@ -1303,7 +1327,7 @@ with aba_receitas:
         st.warning(erro_notas)
     st.write("")
     with st.container(key="novo_receita"):
-        if st.button("+ receita", use_container_width=True):
+        if st.button("+ nova receita", use_container_width=True):
             dialogo_receita(erro_notas=erro_notas)
     st.write("")
 
@@ -1360,12 +1384,12 @@ with aba_invest:
         st.warning(erro_inv)
     st.write("")
     with st.container(key="novo_invest"):
-        col_inv, col_atv = st.columns([1.8, 1])
+        col_inv, col_atv = st.columns([1.3, 1])
         with col_inv:
-            if st.button("+ investimento", use_container_width=True, disabled=bool(erro_inv)):
+            if st.button("+ novo aporte", use_container_width=True, disabled=bool(erro_inv)):
                 dialogo_investimento(df_inv, ativos_inv)
         with col_atv:
-            if st.button("+ ativo", use_container_width=True, disabled=bool(erro_inv)):
+            if st.button("+ novo ativo", use_container_width=True, disabled=bool(erro_inv)):
                 dialogo_novo_ativo(ativos_inv)
     st.write("")
 
@@ -1374,7 +1398,7 @@ with aba_invest:
     else:
         df_inv_ord = df_inv_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
         for idx_row, (_, r) in enumerate(df_inv_ord.iterrows()):
-            it = {"data": r["data"], "tipo": r["tipo"], "ativo": r["ativo"],
+            it = {"data": r["data"], "tipo": r["tipo"], "ativo": r["ativo"], "classe": r["classe"],
                   "quantidade": float(r["quantidade"]), "preco": float(r["preco"]), "total": float(r["total"])}
             compra = it["tipo"] == "compra"
             linha_item(
