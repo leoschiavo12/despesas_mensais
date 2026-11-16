@@ -17,7 +17,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import gspread
-from gspread.utils import ValueRenderOption
+from gspread.utils import ValueRenderOption, DateTimeOption
+import calendar
+import re
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
 import plotly.graph_objects as go
@@ -35,6 +37,15 @@ ABA_NOTAS = "pj_notas"
 RECEITA_TIPOS = ["nota fiscal", "reembolso", "pix"]
 MESES3 = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 ABA_PIX = "pix"   # pagamentos e recebimentos via PIX — fora da fatura (não entra em lancamentos)
+
+# investimentos: aba lancamentos da planilha da carteira (o SmartWallet só lê)
+ABA_INVEST = "lancamentos"
+ABA_ATIVOS = "ativos_info"
+INVEST_HEADERS = ["data", "tipo", "ativo", "classe", "quantidade", "preco_unitario", "total"]
+ATIVOS_FIXOS = [("BTC", "Cripto"), ("Renda+ 2050", "Tesouro Direto")]
+PAISES_ETF = ["Brasil", "EUA", "China", "Europa", "Emergentes", "Global"]
+COL_PARCELAMENTO = "parcelamento"   # 5ª coluna de lancamentos: id que liga as parcelas de uma compra
+MAX_PARCELAS = 24
 
 FIXED_ID = "parcel"
 
@@ -261,6 +272,9 @@ def carregar_lancamentos():
         if not df.empty:
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
             df["data"] = pd.to_datetime(df["data"]).dt.date
+            if COL_PARCELAMENTO not in df.columns:
+                df[COL_PARCELAMENTO] = ""
+            df[COL_PARCELAMENTO] = df[COL_PARCELAMENTO].fillna("").astype(str)
         st.session_state["df_lancamentos"] = df
     return st.session_state["df_lancamentos"]
 
@@ -285,6 +299,200 @@ def excluir_lancamento(data_str, categoria, descricao, valor):
             ws.delete_rows(i)
             break
     recarregar_lancamentos()
+
+
+# ── parcelamentos ──
+# cada parcela é um lançamento normal, datado no mês em que cai na fatura; a coluna
+# "parcelamento" guarda o id da compra, e a descrição termina em " (i/n)".
+
+RE_PARCELA = re.compile(r"^(.*) \((\d+)/(\d+)\)$")
+
+
+def _somar_meses(d, n):
+    m = d.month - 1 + n
+    ano, mes = d.year + m // 12, m % 12 + 1
+    return date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
+
+
+def _garantir_coluna_parcelamento(ws):
+    if ws.col_count < 5:
+        ws.add_cols(5 - ws.col_count)
+    cab = ws.row_values(1)
+    if len(cab) < 5 or cab[4] != COL_PARCELAMENTO:
+        ws.update_cell(1, 5, COL_PARCELAMENTO)
+
+
+def salvar_parcelado(data_compra, categoria, descricao, total, n):
+    """divide o total em n parcelas mensais (a última leva os centavos da divisão)"""
+    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    _garantir_coluna_parcelamento(ws)
+    gid = datetime.now().strftime("%y%m%d%H%M%S")
+    parcela = int(round(total * 100)) // n / 100
+    linhas = []
+    for i in range(n):
+        valor = parcela if i < n - 1 else round(total - parcela * (n - 1), 2)
+        linhas.append([_somar_meses(data_compra, i).isoformat(), categoria,
+                       f"{descricao} ({i + 1}/{n})", valor, gid])
+    ws.append_rows(linhas)
+    recarregar_lancamentos()
+
+
+def parcelamentos_abertos(df):
+    """compras com parcelas em meses futuros: [{gid, nome, categoria, n, futuras: [(data, descricao, valor)]}]"""
+    if df.empty or COL_PARCELAMENTO not in df.columns:
+        return []
+    hoje = date.today()
+    fut = df[(df[COL_PARCELAMENTO] != "") &
+             df["data"].apply(lambda d: (d.year, d.month) > (hoje.year, hoje.month))]
+    grupos = []
+    for gid, g in fut.groupby(COL_PARCELAMENTO):
+        g = g.sort_values("data")
+        m = RE_PARCELA.match(str(g.iloc[0]["descricao"]))
+        grupos.append({
+            "gid": gid, "nome": m.group(1) if m else str(g.iloc[0]["descricao"]),
+            "n": int(m.group(3)) if m else len(g), "categoria": g.iloc[0]["categoria"],
+            "futuras": [(r["data"], str(r["descricao"]), float(r["valor"])) for _, r in g.iterrows()],
+        })
+    return sorted(grupos, key=lambda x: x["futuras"][0][0])
+
+
+def adiantar_parcelas(grupo, k, desconto):
+    """troca as k últimas parcelas futuras por um lançamento hoje, com o desconto abatido"""
+    alvo = grupo["futuras"][-k:]
+    soma = round(sum(v for _, _, v in alvo), 2)
+    nums = [RE_PARCELA.match(d) for _, d, _ in alvo]
+    faixa = (f"{nums[0].group(2)}–{nums[-1].group(2)}/{grupo['n']}" if all(nums) and k > 1
+             else (f"{nums[0].group(2)}/{grupo['n']}" if nums[0] else f"{k}x"))
+    desc = f"{grupo['nome']} (adiant. {faixa}" + (f", desc. {fmt_brl2(desconto)})" if desconto > 0 else ")")
+    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    # primeiro grava o adiantamento; depois apaga as parcelas, de baixo para cima
+    ws.append_row([date.today().isoformat(), grupo["categoria"], desc, round(soma - desconto, 2), grupo["gid"]])
+    registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    chaves = {(d.isoformat(), ds) for d, ds, _ in alvo}
+    linhas = [i for i, r in enumerate(registros, start=2)
+              if str(r.get(COL_PARCELAMENTO, "")) == str(grupo["gid"])
+              and (str(r["data"]), str(r["descricao"])) in chaves]
+    for i in sorted(linhas, reverse=True):
+        ws.delete_rows(i)
+    recarregar_lancamentos()
+
+
+# ── investimentos (planilha da carteira) ──
+
+def _ws_carteira(nome, cabecalho=None):
+    sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
+    if nome not in [w.title for w in sh.worksheets()]:
+        if cabecalho is None:
+            return None
+        ws = sh.add_worksheet(title=nome, rows=200, cols=len(cabecalho))
+        ws.append_row(cabecalho)
+        return ws
+    return sh.worksheet(nome)
+
+
+def _num_br(x):
+    """número vindo da planilha: float, '1.234,56', '0,0001' ou '12.5' → float (inválido → None)"""
+    if isinstance(x, (int, float)):
+        return float(x)
+    t = str(x).strip().replace("R$", "").replace(" ", "")
+    if not t:
+        return None
+    if "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _data_carteira(x):
+    """data da planilha da carteira: 'dd/mm/aaaa' (ou número de série) → date"""
+    if isinstance(x, (int, float)):
+        return (pd.Timestamp("1899-12-30") + pd.Timedelta(days=float(x))).date()
+    d = pd.to_datetime(str(x).strip(), format="%d/%m/%Y", errors="coerce")
+    if pd.isna(d):
+        d = pd.to_datetime(str(x).strip(), dayfirst=True, errors="coerce")
+    return None if pd.isna(d) else d.date()
+
+
+def _ler_invest_bruto(ws):
+    """linhas da aba lancamentos da carteira: [(nº da linha, data, tipo, ativo, classe, qtd, preço, total)]"""
+    vals = ws.get("A:G", value_render_option=ValueRenderOption.unformatted,
+                  date_time_render_option=DateTimeOption.formatted_string)
+    out = []
+    for i, r in enumerate(vals[1:], start=2):
+        r = (list(r) + [""] * 7)[:7]
+        d, q, p, t = _data_carteira(r[0]), _num_br(r[4]), _num_br(r[5]), _num_br(r[6])
+        if d is None or q is None:
+            continue
+        out.append((i, d, str(r[1]).strip().lower(), str(r[2]).strip(), str(r[3]).strip(),
+                    q, p or 0.0, t if t is not None else q * (p or 0.0)))
+    return out
+
+
+def carregar_investimentos():
+    if "df_invest" not in st.session_state:
+        ws = _ws_carteira(ABA_INVEST, INVEST_HEADERS)
+        df = pd.DataFrame(_ler_invest_bruto(ws),
+                          columns=["linha", "data", "tipo", "ativo", "classe", "quantidade", "preco", "total"])
+        st.session_state["df_invest"] = df
+    return st.session_state["df_invest"]
+
+
+def carregar_ativos():
+    """[(ativo, classe)] para o formulário: o que já foi lançado + ativos_info + BTC e Renda+ 2050"""
+    if "ativos_invest" not in st.session_state:
+        ativos = {}
+        ws = _ws_carteira(ABA_ATIVOS)
+        if ws is not None:
+            for r in ws.get_all_values()[1:]:
+                if r and r[0].strip() and len(r) > 1 and r[1].strip():
+                    ativos[r[0].strip().upper()] = r[1].strip()
+        df = carregar_investimentos()
+        for _, r in df.iterrows():
+            if r["ativo"] and r["classe"]:
+                ativos[r["ativo"]] = r["classe"]
+        for a, c in ATIVOS_FIXOS:
+            ativos.setdefault(a, c)
+        ordem = {"ETF": 0, "FII": 1, "Cripto": 2, "Tesouro Direto": 3}
+        st.session_state["ativos_invest"] = sorted(ativos.items(), key=lambda x: (ordem.get(x[1], 9), x[0]))
+    return st.session_state["ativos_invest"]
+
+
+def _limpar_invest():
+    st.session_state.pop("df_invest", None)
+    st.session_state.pop("ativos_invest", None)
+
+
+def _txt_num(v, casas):
+    """float → texto pt-BR para a planilha (mesmo formato que o SmartWallet gravava)"""
+    return f"{v:.{casas}f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def salvar_investimento(data_lanc, tipo, ativo, classe, qtd, preco):
+    ws = _ws_carteira(ABA_INVEST, INVEST_HEADERS)
+    ws.append_row([data_lanc.strftime("%d/%m/%Y"), tipo, ativo, classe,
+                   _txt_num(qtd, 8), _txt_num(preco, 8), _txt_num(round(qtd * preco, 2), 2)],
+                  value_input_option="USER_ENTERED")
+    _limpar_invest()
+
+
+def excluir_investimento(data_lanc, tipo, ativo, qtd, total):
+    """exclusão por conteúdo: relê a aba e apaga a primeira linha igual"""
+    ws = _ws_carteira(ABA_INVEST, INVEST_HEADERS)
+    for linha, d, t, a, _, q, _, tot in _ler_invest_bruto(ws):
+        if (d == data_lanc and t == tipo and a == ativo
+                and abs(q - qtd) < 1e-9 and abs(tot - total) < 0.005):
+            ws.delete_rows(linha)
+            break
+    _limpar_invest()
+
+
+def salvar_ativo_novo(ativo, classe, tipo, indexador, pais):
+    """cadastra o ativo na aba ativos_info da carteira (classificação usada pelo SmartWallet)"""
+    ws = _ws_carteira(ABA_ATIVOS, ["ativo", "classe", "tipo", "indexador", "pais"])
+    ws.append_row([ativo, classe, tipo or "", indexador or "", pais or ""])
+    _limpar_invest()
 
 
 def carregar_pix():
@@ -384,6 +592,15 @@ def salvar_configuracoes(limite, df_categorias):
 
 def formatar_brl(valor):
     return "R$ " + f"{valor:.0f}"
+
+
+def fmt_brl2(valor):
+    """com centavos, pt-BR: R$ 1.234,56"""
+    return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def fmt_qtd(q):
+    return f"{q:.8f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def fmt_pct(p):
@@ -682,8 +899,8 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
             )
 
 
-aba_lancar, aba_receitas, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["despesas", "receitas", "dashboard", "histórico", "orçamento"]
+aba_lancar, aba_receitas, aba_invest, aba_dash, aba_hist, aba_orc = st.tabs(
+    ["despesas", "receitas", "investimentos", "dashboard", "histórico", "orçamento"]
 )
 
 # ───────────────────────── ABA: LANÇAR ─────────────────────────
@@ -729,7 +946,12 @@ with aba_lancar:
             with col_val:
                 valor_txt = st.text_input("valor (R$)", placeholder="0,00")
 
-            descricao = st.text_input("descrição")
+            col_desc, col_parc = st.columns([1.6, 1])
+            with col_desc:
+                descricao = st.text_input("descrição")
+            with col_parc:
+                n_parcelas = st.selectbox("parcelas", options=list(range(1, MAX_PARCELAS + 1)), index=0,
+                                          format_func=lambda n: "à vista" if n == 1 else f"{n}x")
 
             ativar_campos_formulario("valor (R$)")
 
@@ -739,6 +961,14 @@ with aba_lancar:
                 valor = parse_valor(valor_txt)
                 if valor <= 0:
                     st.error("informe um valor válido.")
+                elif n_parcelas > 1 and pagamento == "pix":
+                    st.error("parcelamento só no cartão.")
+                elif n_parcelas > 1:
+                    # valor = total da compra; cada parcela cai na fatura do seu mês
+                    salvar_parcelado(data_lanc, categoria_id, descricao.strip() or opcoes_labels[categoria_id],
+                                     valor, n_parcelas)
+                    st.success("registrado!")
+                    st.rerun(scope="app")
                 else:
                     if pagamento == "pix":
                         # pix: aba pix (fora da fatura do cartão e dos gráficos)
@@ -749,6 +979,49 @@ with aba_lancar:
                     st.rerun(scope="app")
 
     form_lancamento()
+
+    @st.dialog("adiantar parcelas")
+    def dialogo_adiantar(grupo):
+        fut = grupo["futuras"]
+        st.markdown(f"**{grupo['nome']}** · restam {len(fut)} de {grupo['n']}")
+        k = st.selectbox("parcelas a adiantar", options=list(range(len(fut), 0, -1)), index=0,
+                         format_func=lambda n: (f"todas ({n})" if n == len(fut) else
+                                                ("a última" if n == 1 else f"as {n} últimas")))
+        desconto_txt = st.text_input("desconto (R$)", placeholder="0,00")
+        ativar_campos_formulario("desconto (R$)")
+        soma = round(sum(v for _, _, v in fut[-k:]), 2)
+        desconto = parse_valor(desconto_txt)
+        st.markdown(
+            f"<div style='font-size:13px;color:#888;'>parcelas: {fmt_brl2(soma)} · desconto: {fmt_brl2(desconto)}</div>"
+            f"<div style='font-size:1.3rem;font-weight:600;margin:2px 0 10px;'>a pagar hoje: "
+            f"{fmt_brl2(max(soma - desconto, 0))}</div>".replace("$", "&#36;"), unsafe_allow_html=True)
+        st.caption("as parcelas adiantadas saem dos meses futuros e o valor com desconto entra na fatura deste mês.")
+        if st.button("adiantar", type="primary", use_container_width=True):
+            if desconto < 0 or desconto >= soma:
+                st.error("o desconto precisa ser menor que o valor das parcelas.")
+            else:
+                adiantar_parcelas(grupo, k, desconto)
+                st.rerun(scope="app")
+
+    abertos = parcelamentos_abertos(carregar_lancamentos())
+    if abertos:
+        st.write("")
+        st.markdown("<div style='font-size:12px;color:#888;margin-bottom:4px;'>parcelamentos em aberto</div>",
+                    unsafe_allow_html=True)
+        for g in abertos:
+            fut = g["futuras"]
+            col_desc, col_acao, col_val = st.columns([3.2, 1.7, 1.6])
+            with col_desc:
+                st.markdown(
+                    f"**{g['nome']}**  \n<span style='color:#888;font-size:12px;'>restam {len(fut)} de {g['n']} · "
+                    f"{fmt_brl2(fut[0][2])}/mês · até {mes_label(fut[-1][0])}</span>".replace("$", "&#36;"),
+                    unsafe_allow_html=True)
+            with col_acao:
+                if st.button("adiantar", key=f"adi_{g['gid']}", use_container_width=True):
+                    dialogo_adiantar(g)
+            with col_val:
+                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>"
+                            f"{formatar_brl(sum(v for _, _, v in fut))}</div>", unsafe_allow_html=True)
 
 with aba_dash:
     render_nav_mes("dash")
@@ -938,6 +1211,151 @@ with aba_receitas:
                 if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
                     st.session_state.pop(pendente_key, None)
                     st.rerun()
+
+# ───────────────────────── ABA: INVESTIMENTOS ─────────────────────────
+# compras e vendas da carteira: gravam na aba lancamentos da planilha da carteira,
+# no mesmo formato de antes — o SmartWallet só lê.
+
+def render_cards_invest(aportes, vendas, media_6m):
+    def bloco(rotulo, valor, alinhar):
+        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
+                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
+    st.markdown(
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
+        + bloco("compras (R&#36;)", aportes, "start") + bloco("vendas (R&#36;)", vendas, "center")
+        + bloco("média 6m (R&#36;)", media_6m, "end") + "</div></div>", unsafe_allow_html=True)
+
+
+with aba_invest:
+    render_nav_mes("inv")
+    ref_inv = st.session_state["mes_ref"]
+    try:
+        df_inv = carregar_investimentos()
+        ativos_inv = carregar_ativos()
+        erro_inv = None
+    except Exception as e:
+        df_inv = pd.DataFrame(columns=["linha", "data", "tipo", "ativo", "classe", "quantidade", "preco", "total"])
+        ativos_inv, erro_inv = [], f"planilha da carteira indisponível ({str(e)[:60]})"
+
+    df_inv_mes = filtrar_mes(df_inv, ref_inv.year, ref_inv.month)
+    _tot = lambda d, t: float(d[d["tipo"] == t]["total"].sum()) if not d.empty else 0.0
+    # média do líquido (compras − vendas) dos 6 meses anteriores ao mês exibido
+    _liq, _m = [], ref_inv
+    for _ in range(6):
+        _m = mes_anterior(_m)
+        _d = filtrar_mes(df_inv, _m.year, _m.month)
+        _liq.append(_tot(_d, "compra") - _tot(_d, "venda"))
+    render_cards_invest(_tot(df_inv_mes, "compra"), _tot(df_inv_mes, "venda"), sum(_liq) / 6)
+    if erro_inv:
+        st.warning(erro_inv)
+    st.write("")
+
+    @st.fragment
+    def form_investimento():
+        nomes = [a for a, _ in ativos_inv]
+        classes = dict(ativos_inv)
+        with st.form("form_invest", clear_on_submit=True):
+            col_tipo, col_ativo = st.columns([1, 1.6])
+            with col_tipo:
+                tipo = st.selectbox("tipo", options=["compra", "venda"], index=0)
+            with col_ativo:
+                ativo = st.selectbox("ativo", options=nomes, index=0 if nomes else None)
+            col_data, col_qtd = st.columns([1, 1])
+            with col_data:
+                data_lanc = st.date_input("data", value=date.today(), max_value=date.today(), format="DD/MM/YYYY")
+            with col_qtd:
+                qtd_txt = st.text_input("quantidade", placeholder="ex.: 10")
+            preco_txt = st.text_input("preço unitário (R$)", placeholder="0,00")
+            ativar_campos_formulario("preço unitário (R$)")
+            enviado = st.form_submit_button("registrar investimento", use_container_width=True)
+            if enviado:
+                qtd = _num_br(qtd_txt) or 0.0
+                preco = parse_valor(preco_txt)
+                posicao = 0.0
+                if ativo and not df_inv.empty:
+                    _a = df_inv[df_inv["ativo"] == ativo]
+                    posicao = float(_a[_a["tipo"] == "compra"]["quantidade"].sum()
+                                    - _a[_a["tipo"] == "venda"]["quantidade"].sum())
+                if erro_inv:
+                    st.error(erro_inv)
+                elif not ativo:
+                    st.error("escolha um ativo.")
+                elif qtd <= 0 or preco <= 0:
+                    st.error("informe quantidade e preço.")
+                elif tipo == "venda" and qtd > posicao + 1e-9:
+                    st.error(f"venda maior que a posição ({fmt_qtd(posicao)} de {ativo}).")
+                else:
+                    salvar_investimento(data_lanc, tipo, ativo, classes[ativo], qtd, preco)
+                    st.success("registrado!")
+                    st.rerun(scope="app")
+
+    form_investimento()
+
+    with st.expander("novo ativo"):
+        col_tk, col_cl = st.columns([1, 1])
+        with col_tk:
+            # a chave muda a cada cadastro, para o campo voltar vazio
+            novo_ticker = st.text_input("ticker", placeholder="ex.: HGLG11",
+                                        key=f"novo_ticker_{st.session_state.get('novo_n', 0)}").strip().upper()
+        with col_cl:
+            novo_classe = st.selectbox("classe", ["FII", "ETF"], key="novo_classe")
+        novo_tipo = novo_idx = novo_pais = None
+        if novo_classe == "FII":
+            novo_tipo = st.selectbox("tipo do FII", ["tijolo", "papel"], key="novo_tipo")
+            if novo_tipo == "papel":
+                novo_idx = st.selectbox("indexador", ["CDI", "IPCA"], key="novo_idx")
+        else:
+            novo_pais = st.selectbox("país", PAISES_ETF, key="novo_pais")
+        if st.button("cadastrar ativo", use_container_width=True):
+            if not re.fullmatch(r"[A-Z]{4}\d{1,2}", novo_ticker or ""):
+                st.error("ticker inválido — use o formato da B3 (ex.: HGLG11).")
+            elif novo_ticker in dict(ativos_inv):
+                st.error(f"{novo_ticker} já está na lista.")
+            elif erro_inv:
+                st.error(erro_inv)
+            else:
+                salvar_ativo_novo(novo_ticker, novo_classe, novo_tipo, novo_idx, novo_pais)
+                st.session_state["novo_n"] = st.session_state.get("novo_n", 0) + 1
+                st.rerun()
+
+    st.write("")
+    if df_inv_mes.empty:
+        st.caption("nenhum investimento neste mês.")
+    else:
+        df_inv_ord = df_inv_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
+        for idx_row, (_, r) in enumerate(df_inv_ord.iterrows()):
+            compra = r["tipo"] == "compra"
+            item_id = f"inv_{idx_row}_{r['data']}_{r['ativo']}_{r['total']}"
+            pendente_key = f"pendente_del_{item_id}"
+            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
+            with col_desc:
+                st.markdown(
+                    f"**{r['ativo']}**  \n<span style='color:#888;font-size:12px;'>{r['tipo']} · "
+                    f"{fmt_qtd(r['quantidade'])} × {fmt_brl2(r['preco'])} · {r['data'].strftime('%d/%m/%y')}</span>"
+                    .replace("$", "&#36;"), unsafe_allow_html=True)
+            with col_acao:
+                if not st.session_state.get(pendente_key):
+                    if st.button("✕", key=f"del_{item_id}", use_container_width=True):
+                        st.session_state[pendente_key] = True
+                        st.rerun()
+            with col_val:
+                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:{'#1D9E75' if compra else 'inherit'};'>"
+                            f"{'+' if compra else '−'} {formatar_brl(r['total'])}</div>", unsafe_allow_html=True)
+            if st.session_state.get(pendente_key):
+                st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
+                            "excluir este investimento?</div>", unsafe_allow_html=True)
+                col_confirma, col_cancela = st.columns(2)
+                with col_confirma:
+                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                        excluir_investimento(r["data"], r["tipo"], r["ativo"], r["quantidade"], r["total"])
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun(scope="app")
+                with col_cancela:
+                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                        st.session_state.pop(pendente_key, None)
+                        st.rerun()
 
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
