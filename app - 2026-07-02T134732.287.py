@@ -22,7 +22,6 @@ import calendar
 import re
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
-import plotly.graph_objects as go
 
 # ───────────────────────── CONFIG ─────────────────────────
 
@@ -179,6 +178,20 @@ div[data-testid="stForm"] {
 }
 div[data-testid="stForm"] div[data-testid="stVerticalBlock"] {
     gap: 0.9rem !important;
+}
+/* formulário dentro da janela (st.dialog): sem moldura própria */
+div[role="dialog"] div[data-testid="stForm"],
+div[data-testid="stDialog"] div[data-testid="stForm"],
+div[data-testid="stDialog"] [data-testid="stForm"] {
+    border: none !important;
+    padding: 0 !important;
+}
+/* botões que abrem os formulários: mesma altura dos campos */
+div[class*="st-key-novo_"] button {
+    min-height: var(--altura-campo) !important;
+    height: var(--altura-campo) !important;
+    font-size: 0.9rem !important;
+    border-radius: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -495,6 +508,59 @@ def salvar_ativo_novo(ativo, classe, tipo, indexador, pais):
     _limpar_invest()
 
 
+def atualizar_lancamento(orig, novo):
+    """orig/novo: (data aaaa-mm-dd, categoria, descrição, valor) — a coluna parcelamento fica como está"""
+    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    for i, r in enumerate(registros, start=2):
+        if (str(r["data"]) == str(orig[0]) and r["categoria"] == orig[1]
+                and str(r["descricao"]) == str(orig[2]) and float(r["valor"]) == float(orig[3])):
+            ws.update(range_name=f"A{i}:D{i}", values=[list(novo)])
+            break
+    recarregar_lancamentos()
+
+
+def atualizar_pix(orig, novo):
+    """orig/novo: (data aaaa-mm-dd, tipo, categoria, descrição, valor)"""
+    ws = get_spreadsheet().worksheet(ABA_PIX)
+    registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    for i, r in enumerate(registros, start=2):
+        if (str(r["data"]) == str(orig[0]) and str(r["tipo"]).strip().lower() == orig[1]
+                and str(r["categoria"]) == str(orig[2]) and str(r["descricao"]) == str(orig[3])
+                and float(r["valor"]) == float(orig[4])):
+            ws.update(range_name=f"A{i}:E{i}", values=[list(novo)])
+            break
+    st.session_state.pop("df_pix", None)
+
+
+def atualizar_nota(tipo, data_txt, valor, descricao, nova_data, novo_valor, nova_descricao):
+    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    regs = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
+    for i, r in enumerate(regs, start=2):
+        if (str(r["tipo"]).strip().lower() == tipo and str(r["data"]) == str(data_txt)
+                and abs(float(r["valor"] or 0) - float(valor)) < 0.005
+                and str(r.get("descricao", "")) == str(descricao)):
+            ws.update(range_name=f"A{i}:E{i}", values=[[
+                tipo, nova_data.strftime("%d/%m/%Y"), float(novo_valor),
+                "mês seguinte" if tipo == "nota fiscal" else "", nova_descricao]])
+            break
+    st.session_state.pop("df_notas", None)
+
+
+def atualizar_investimento(orig, data_lanc, tipo, ativo, classe, qtd, preco, total):
+    """orig: (data, tipo, ativo, quantidade, total) da linha a trocar"""
+    ws = _ws_carteira(ABA_INVEST, INVEST_HEADERS)
+    for linha, d, t, a, _, q, _, tot in _ler_invest_bruto(ws):
+        if (d == orig[0] and t == orig[1] and a == orig[2]
+                and abs(q - orig[3]) < 1e-9 and abs(tot - orig[4]) < 0.005):
+            ws.update(range_name=f"A{linha}:G{linha}", values=[[
+                data_lanc.strftime("%d/%m/%Y"), tipo, ativo, classe,
+                _txt_num(qtd, 8), _txt_num(preco, 8), _txt_num(round(total, 2), 2)]],
+                value_input_option="USER_ENTERED")
+            break
+    _limpar_invest()
+
+
 def carregar_pix():
     """lançamentos de PIX (aba pix) — totalmente separados da fatura do cartão"""
     if "df_pix" not in st.session_state:
@@ -771,7 +837,7 @@ def _barra_html(titulo, direita, pct, cor, marcador=None):
     )
 
 
-def render_cards_limite(df_mes, limite_mensal):
+def render_cards_limite(df_mes, limite_mensal, mes_ref=None):
     """Painel da aba lançar: total da fatura / limite disponível + barras de fatura e de mês."""
     import calendar
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
@@ -780,6 +846,8 @@ def render_cards_limite(df_mes, limite_mensal):
     hoje = date.today()
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     pct_mes = hoje.day / dias_no_mes
+    if mes_ref is not None and (mes_ref.year, mes_ref.month) < (hoje.year, hoje.month):
+        pct_mes = 1.0
     pct_fatura = total_gasto / limite_mensal if limite_mensal > 0 else 0
 
     # cor/estado da fatura comparando com o ritmo do mês
@@ -819,55 +887,8 @@ def render_cards_limite(df_mes, limite_mensal):
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
-    """Gráfico de rosca + barras de progresso por categoria."""
-    total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
-    gasto_parcel = df_mes[df_mes["categoria"] == FIXED_ID]["valor"].sum() if not df_mes.empty else 0
-    gasto_outros = max(0, total_gasto - gasto_parcel)
-    disponivel = limite_mensal - total_gasto
-
-    meses_extenso = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
-                      "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
-    nome_mes_atual = meses_extenso[mes_ref.month - 1]
-
-    # Ordem FIXA (não reordena conforme os valores mudam). O Plotly sempre desenha
-    # a 1ª fatia da lista começando às 12h e indo para a direita, não importa o
-    # "direction" — confirmado empiricamente. parcelamentos precisa ser a ÚLTIMA
-    # fatia (termina às 12h, ocupando o 2º quadrante); disponível vem logo antes
-    # dela (fica adjacente, no 3º quadrante); despesas fica com o restante.
-    # A legenda é desenhada à parte (showlegend=False), na ordem pedida
-    # (parcelamentos, mês atual, disponível), pois no Plotly a legenda segue a
-    # ordem das fatias — desenhando a nossa própria, as duas ordens ficam livres.
-    fatia_disp = max(0, disponivel)
-    labels, valores, cores = [], [], []
-    if fatia_disp > 0:
-        labels.append("disponível"); valores.append(fatia_disp); cores.append("#2a2a2a")
-    if gasto_outros > 0:
-        labels.append(nome_mes_atual); valores.append(gasto_outros); cores.append("#D85A30")
-    if gasto_parcel > 0:
-        labels.append("parcelamentos"); valores.append(gasto_parcel); cores.append("#E5B800")
-
-    if valores:
-        soma_valores = sum(valores)
-        percentuais = [fmt_pct(v / soma_valores * 100) for v in valores]
-        valores_fmt = [f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
-        fig = go.Figure(data=[go.Pie(
-            labels=labels, values=valores, hole=0.65, marker=dict(colors=cores),
-            sort=False, direction="clockwise", rotation=0,
-            text=percentuais, texttemplate="%{label}<br>%{text}", textposition="outside",
-            textfont=dict(size=13, color="#e8e8e6"),
-            customdata=valores_fmt,
-            hovertemplate="%{label}<br>R$ %{customdata}<br>%{text}<extra></extra>",
-            automargin=True,
-        )])
-        fig.update_layout(
-            showlegend=False,
-            margin=dict(t=50, b=50, l=70, r=70), height=380,
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"pie_{chave}")
-    else:
-        st.caption("sem lançamentos neste mês.")
-
+def render_barras_categorias(df_mes, limite_mensal, df_cat):
+    """barras de progresso por categoria: gasto / orçamento"""
     gasto_por_cat = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
     cats_ordenadas = df_cat[df_cat["id"] != FIXED_ID].copy()
     cats_ordenadas["gasto"] = cats_ordenadas["id"].map(gasto_por_cat).fillna(0)
@@ -875,133 +896,332 @@ def render_grafico_categorias(df_mes, limite_mensal, df_cat, chave, mes_ref):
 
     if cats_ordenadas.empty:
         st.caption("nenhuma categoria configurada.")
+        return
+    for _, c in cats_ordenadas.iterrows():
+        orcamento = orcamento_categoria(c, limite_mensal)
+        gasto = c["gasto"]
+        pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
+        estourou = gasto > orcamento and orcamento > 0
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
+            f"<span>{c['nome'].lower()}</span>"
+            f"<span style='color:{'#e05252' if estourou else '#888'};'>"
+            f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.progress(pct)
+
+    gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
+    if gasto_parcel_mes > 0:
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
+            f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_cards_3(blocos):
+    """painel do mês com 3 números (mesmo visual do painel da fatura): [(rótulo, valor)]"""
+    def bloco(rotulo, valor, alinhar):
+        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
+                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
+                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
+    st.markdown(
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
+        + "".join(bloco(r.replace("$", "&#36;"), v, al)
+                  for (r, v), al in zip(blocos, ["start", "center", "end"]))
+        + "</div></div>", unsafe_allow_html=True)
+
+
+def linha_item(item_id, titulo, sub, valor_html, ao_editar, ao_excluir, pergunta):
+    """linha do histórico: título + detalhe · ✎ editar · ✕ excluir (com confirmação) · valor"""
+    pendente_key = f"pendente_del_{item_id}"
+    col_desc, col_ed, col_del, col_val = st.columns([3.0, 0.8, 0.8, 1.7])
+    with col_desc:
+        st.markdown(f"**{titulo}**  \n<span style='color:#888;font-size:12px;'>{sub}</span>".replace("$", "&#36;"),
+                    unsafe_allow_html=True)
+    with col_ed:
+        if st.button("✎", key=f"ed_{item_id}", use_container_width=True):
+            ao_editar()
+    with col_del:
+        if not st.session_state.get(pendente_key):
+            if st.button("✕", key=f"del_{item_id}", use_container_width=True):
+                st.session_state[pendente_key] = True
+                st.rerun()
+    with col_val:
+        st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>{valor_html}</div>", unsafe_allow_html=True)
+    if st.session_state.get(pendente_key):
+        st.markdown(f"<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>{pergunta}</div>",
+                    unsafe_allow_html=True)
+        col_confirma, col_cancela = st.columns(2)
+        with col_confirma:
+            if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
+                ao_excluir()
+                st.session_state.pop(pendente_key, None)
+                st.rerun()
+        with col_cancela:
+            if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
+                st.session_state.pop(pendente_key, None)
+                st.rerun()
+
+
+def _txt_valor(v):
+    """valor para pré-preencher o campo com máscara de centavos"""
+    return f"{v:.2f}".replace(".", ",")
+
+
+def _fechar(msg):
+    st.session_state["_msg"] = msg
+    st.rerun()
+
+
+# ───────────────────────── FORMULÁRIOS (janelas) ─────────────────────────
+# cada formulário abre numa janela por cima da página; com item=... vem preenchido para edição.
+
+@st.dialog("despesa")
+def dialogo_despesa(item=None):
+    todas_cats = df_cat.copy()
+    todas_cats["nome_lower"] = todas_cats["nome"].str.lower()
+    todas_cats = todas_cats.sort_values("nome_lower")
+    opcoes_ids = todas_cats["id"].tolist()
+    opcoes_labels = dict(zip(todas_cats["id"], todas_cats["nome_lower"]))
+    if item:
+        index_default = opcoes_ids.index(item["categoria"]) if item["categoria"] in opcoes_ids else 0
     else:
-        for _, c in cats_ordenadas.iterrows():
-            orcamento = orcamento_categoria(c, limite_mensal)
-            gasto = c["gasto"]
-            pct = min(gasto / orcamento, 1.0) if orcamento > 0 else 0
-            estourou = gasto > orcamento and orcamento > 0
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;'>"
-                f"<span>{c['nome'].lower()}</span>"
-                f"<span style='color:{'#e05252' if estourou else '#888'};'>"
-                f"{formatar_brl(gasto)} / {formatar_brl(orcamento)}</span></div>",
-                unsafe_allow_html=True,
-            )
-            st.progress(pct)
-
-        gasto_parcel_mes = gasto_por_cat.get(FIXED_ID, 0)
-        if gasto_parcel_mes > 0:
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;font-size:13px;margin-top:6px;'>"
-                f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
-                unsafe_allow_html=True,
-            )
-
-
-aba_lancar, aba_receitas, aba_invest, aba_dash, aba_hist, aba_orc = st.tabs(
-    ["despesas", "receitas", "investimentos", "dashboard", "histórico", "orçamento"]
-)
-
-# ───────────────────────── ABA: LANÇAR ─────────────────────────
-
-with aba_lancar:
-    hoje = date.today()
-    df_mes_atual_lancar = filtrar_mes(carregar_lancamentos(), hoje.year, hoje.month)
-    render_cards_limite(df_mes_atual_lancar, limite_mensal)
-    st.write("")
-
-    @st.fragment
-    def form_lancamento():
-        mes_ant = mes_anterior(hoje)
+        # padrão: a categoria com mais gasto no mês anterior
+        mes_ant = mes_anterior(date.today())
         df_mes_ant = filtrar_mes(carregar_lancamentos(), mes_ant.year, mes_ant.month)
         gasto_mes_ant = df_mes_ant.groupby("categoria")["valor"].sum().to_dict() if not df_mes_ant.empty else {}
+        categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get) if gasto_mes_ant else None
+        index_default = opcoes_ids.index(categoria_default) if categoria_default in opcoes_ids else 0
 
-        todas_cats = df_cat.copy()
-        todas_cats["nome_lower"] = todas_cats["nome"].str.lower()
-        todas_cats = todas_cats.sort_values("nome_lower")
-
-        opcoes_ids = todas_cats["id"].tolist()
-        opcoes_labels = dict(zip(todas_cats["id"], todas_cats["nome_lower"]))
-
-        if gasto_mes_ant:
-            categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get)
-            index_default = opcoes_ids.index(categoria_default) if categoria_default in opcoes_ids else 0
+    with st.form("form_despesa_edit" if item else "form_despesa", border=False):
+        if item:
+            st.caption(f"pagamento: {item['pagamento']}")
+            categoria_id = st.selectbox("categoria", options=opcoes_ids, index=index_default,
+                                        format_func=lambda x: opcoes_labels[x])
+            pagamento, n_parcelas = item["pagamento"], 1
         else:
-            index_default = 0
-
-        with st.form("form_lancar", clear_on_submit=True):
             col_pag, col_cat = st.columns([1, 1.6])
             with col_pag:
                 pagamento = st.selectbox("pagamento", options=["cartão", "pix"], index=0)
             with col_cat:
-                categoria_id = st.selectbox(
-                    "categoria", options=opcoes_ids, index=index_default,
-                    format_func=lambda x: opcoes_labels[x],
-                )
-
-            col_data, col_val = st.columns([1, 1])
-            with col_data:
-                data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
-            with col_val:
-                valor_txt = st.text_input("valor (R$)", placeholder="0,00")
-
+                categoria_id = st.selectbox("categoria", options=opcoes_ids, index=index_default,
+                                            format_func=lambda x: opcoes_labels[x])
+        col_data, col_val = st.columns([1, 1])
+        with col_data:
+            data_lanc = st.date_input("data", value=item["data"] if item else date.today(), format="DD/MM/YYYY")
+        with col_val:
+            valor_txt = st.text_input("valor (R$)", value=_txt_valor(item["valor"]) if item else "",
+                                      placeholder="0,00")
+        if item:
+            descricao = st.text_input("descrição", value=item["descricao"])
+        else:
             col_desc, col_parc = st.columns([1.6, 1])
             with col_desc:
                 descricao = st.text_input("descrição")
             with col_parc:
                 n_parcelas = st.selectbox("parcelas", options=list(range(1, MAX_PARCELAS + 1)), index=0,
                                           format_func=lambda n: "à vista" if n == 1 else f"{n}x")
+        ativar_campos_formulario("valor (R$)")
+        enviado = st.form_submit_button("salvar" if item else "registrar despesa", use_container_width=True)
 
-            ativar_campos_formulario("valor (R$)")
-
-            enviado = st.form_submit_button("registrar despesa", use_container_width=True)
-
-            if enviado:
-                valor = parse_valor(valor_txt)
-                if valor <= 0:
-                    st.error("informe um valor válido.")
-                elif n_parcelas > 1 and pagamento == "pix":
-                    st.error("parcelamento só no cartão.")
-                elif n_parcelas > 1:
-                    # valor = total da compra; cada parcela cai na fatura do seu mês
-                    salvar_parcelado(data_lanc, categoria_id, descricao.strip() or opcoes_labels[categoria_id],
-                                     valor, n_parcelas)
-                    st.success("registrado!")
-                    st.rerun(scope="app")
-                else:
-                    if pagamento == "pix":
-                        # pix: aba pix (fora da fatura do cartão e dos gráficos)
-                        salvar_pix(data_lanc.isoformat(), "saida", categoria_id, descricao, valor)
-                    else:
-                        salvar_lancamento(data_lanc.isoformat(), categoria_id, descricao, valor)
-                    st.success("registrado!")
-                    st.rerun(scope="app")
-
-    form_lancamento()
-
-    @st.dialog("adiantar parcelas")
-    def dialogo_adiantar(grupo):
-        fut = grupo["futuras"]
-        st.markdown(f"**{grupo['nome']}** · restam {len(fut)} de {grupo['n']}")
-        k = st.selectbox("parcelas a adiantar", options=list(range(len(fut), 0, -1)), index=0,
-                         format_func=lambda n: (f"todas ({n})" if n == len(fut) else
-                                                ("a última" if n == 1 else f"as {n} últimas")))
-        desconto_txt = st.text_input("desconto (R$)", placeholder="0,00")
-        ativar_campos_formulario("desconto (R$)")
-        soma = round(sum(v for _, _, v in fut[-k:]), 2)
-        desconto = parse_valor(desconto_txt)
-        st.markdown(
-            f"<div style='font-size:13px;color:#888;'>parcelas: {fmt_brl2(soma)} · desconto: {fmt_brl2(desconto)}</div>"
-            f"<div style='font-size:1.3rem;font-weight:600;margin:2px 0 10px;'>a pagar hoje: "
-            f"{fmt_brl2(max(soma - desconto, 0))}</div>".replace("$", "&#36;"), unsafe_allow_html=True)
-        st.caption("as parcelas adiantadas saem dos meses futuros e o valor com desconto entra na fatura deste mês.")
-        if st.button("adiantar", type="primary", use_container_width=True):
-            if desconto < 0 or desconto >= soma:
-                st.error("o desconto precisa ser menor que o valor das parcelas.")
+        if enviado:
+            valor = parse_valor(valor_txt)
+            if valor <= 0:
+                st.error("informe um valor válido.")
+            elif item and pagamento == "pix":
+                atualizar_pix((item["data"].isoformat(), "saida", item["categoria"], item["descricao"], item["valor"]),
+                              (data_lanc.isoformat(), "saida", categoria_id, descricao, valor))
+                _fechar("alterado!")
+            elif item:
+                atualizar_lancamento((item["data"].isoformat(), item["categoria"], item["descricao"], item["valor"]),
+                                     (data_lanc.isoformat(), categoria_id, descricao, valor))
+                _fechar("alterado!")
+            elif n_parcelas > 1 and pagamento == "pix":
+                st.error("parcelamento só no cartão.")
+            elif n_parcelas > 1:
+                # valor = total da compra; cada parcela cai na fatura do seu mês
+                salvar_parcelado(data_lanc, categoria_id, descricao.strip() or opcoes_labels[categoria_id],
+                                 valor, n_parcelas)
+                _fechar("registrado!")
+            elif pagamento == "pix":
+                # pix: aba pix (fora da fatura do cartão)
+                salvar_pix(data_lanc.isoformat(), "saida", categoria_id, descricao, valor)
+                _fechar("registrado!")
             else:
-                adiantar_parcelas(grupo, k, desconto)
-                st.rerun(scope="app")
+                salvar_lancamento(data_lanc.isoformat(), categoria_id, descricao, valor)
+                _fechar("registrado!")
+
+
+@st.dialog("adiantar parcelas")
+def dialogo_adiantar(grupo):
+    fut = grupo["futuras"]
+    st.markdown(f"**{grupo['nome']}** · restam {len(fut)} de {grupo['n']}")
+    k = st.selectbox("parcelas a adiantar", options=list(range(len(fut), 0, -1)), index=0,
+                     format_func=lambda n: (f"todas ({n})" if n == len(fut) else
+                                            ("a última" if n == 1 else f"as {n} últimas")))
+    desconto_txt = st.text_input("desconto (R$)", placeholder="0,00")
+    ativar_campos_formulario("desconto (R$)")
+    soma = round(sum(v for _, _, v in fut[-k:]), 2)
+    desconto = parse_valor(desconto_txt)
+    st.markdown(
+        f"<div style='font-size:13px;color:#888;'>parcelas: {fmt_brl2(soma)} · desconto: {fmt_brl2(desconto)}</div>"
+        f"<div style='font-size:1.3rem;font-weight:600;margin:2px 0 10px;'>a pagar hoje: "
+        f"{fmt_brl2(max(soma - desconto, 0))}</div>".replace("$", "&#36;"), unsafe_allow_html=True)
+    st.caption("as parcelas adiantadas saem dos meses futuros e o valor com desconto entra na fatura deste mês.")
+    if st.button("adiantar", type="primary", use_container_width=True):
+        if desconto < 0 or desconto >= soma:
+            st.error("o desconto precisa ser menor que o valor das parcelas.")
+        else:
+            adiantar_parcelas(grupo, k, desconto)
+            _fechar("parcelas adiantadas!")
+
+
+@st.dialog("receita")
+def dialogo_receita(item=None, erro_notas=None):
+    """nota fiscal e reembolso → aba pj_notas da carteira; pix → aba pix (entrada), fora da fatura"""
+    with st.form("form_receita_edit" if item else "form_receita", border=False):
+        if item:
+            st.caption(f"tipo: {item['tipo']}")
+            tipo = item["tipo"]
+        else:
+            tipo = st.selectbox("tipo", options=RECEITA_TIPOS, index=0)
+        col_data, col_val = st.columns([1, 1])
+        with col_data:
+            data_lanc = st.date_input("data", value=item["data"] if item else date.today(), format="DD/MM/YYYY")
+        with col_val:
+            valor_txt = st.text_input("valor (R$)", value=_txt_valor(item["valor"]) if item else "",
+                                      placeholder="0,00")
+        descricao = st.text_input("descrição", value=item["descricao"] if item else "")
+        ativar_campos_formulario("valor (R$)")
+        enviado = st.form_submit_button("salvar" if item else "registrar receita", use_container_width=True)
+        if enviado:
+            valor = parse_valor(valor_txt)
+            if valor <= 0:
+                st.error("informe um valor válido.")
+            elif tipo == "pix" and item:
+                atualizar_pix((item["data"].isoformat(), "entrada", item["categoria"], item["descricao"], item["valor"]),
+                              (data_lanc.isoformat(), "entrada", item["categoria"], descricao, valor))
+                _fechar("alterado!")
+            elif tipo == "pix":
+                salvar_pix(data_lanc.isoformat(), "entrada", "receita", descricao, valor)
+                _fechar("registrado!")
+            elif erro_notas:
+                st.error(erro_notas)
+            elif item:
+                atualizar_nota(tipo, item["data_txt"], item["valor"], item["descricao"], data_lanc, valor, descricao)
+                _fechar("alterado!")
+            else:
+                salvar_nota(tipo, data_lanc, valor, descricao)
+                if tipo == "nota fiscal":       # nota é recebida (e paga DAS) no mês seguinte
+                    cx = date(data_lanc.year + (data_lanc.month == 12), data_lanc.month % 12 + 1, 1)
+                    _fechar(f"registrada! entra no caixa de {MESES3[cx.month - 1]}/{str(cx.year)[2:]}")
+                _fechar("registrado!")
+
+
+@st.dialog("investimento")
+def dialogo_investimento(df_inv, ativos_inv, item=None):
+    nomes = [a for a, _ in ativos_inv]
+    classes = dict(ativos_inv)
+    preco_ini = _txt_valor(item["preco"]) if item else ""
+    with st.form("form_invest_edit" if item else "form_invest", border=False):
+        col_tipo, col_ativo = st.columns([1, 1.6])
+        with col_tipo:
+            tipo = st.selectbox("tipo", options=["compra", "venda"],
+                                index=1 if item and item["tipo"] == "venda" else 0)
+        with col_ativo:
+            ativo = st.selectbox("ativo", options=nomes,
+                                 index=(nomes.index(item["ativo"]) if item and item["ativo"] in nomes
+                                        else (0 if nomes else None)))
+        col_data, col_qtd = st.columns([1, 1])
+        with col_data:
+            data_lanc = st.date_input("data", value=item["data"] if item else date.today(),
+                                      max_value=date.today(), format="DD/MM/YYYY")
+        with col_qtd:
+            qtd_txt = st.text_input("quantidade", value=fmt_qtd(item["quantidade"]) if item else "",
+                                    placeholder="ex.: 10")
+        preco_txt = st.text_input("preço unitário (R$)", value=preco_ini, placeholder="0,00")
+        ativar_campos_formulario("preço unitário (R$)")
+        enviado = st.form_submit_button("salvar" if item else "registrar investimento", use_container_width=True)
+        if enviado:
+            qtd = _num_br(qtd_txt) or 0.0
+            # preço não mexido na edição: mantém o original (pode ter mais de 2 casas)
+            preco = item["preco"] if item and preco_txt == preco_ini else parse_valor(preco_txt)
+            posicao = 0.0
+            if ativo and not df_inv.empty:
+                _a = df_inv[df_inv["ativo"] == ativo]
+                posicao = float(_a[_a["tipo"] == "compra"]["quantidade"].sum()
+                                - _a[_a["tipo"] == "venda"]["quantidade"].sum())
+                if item and item["ativo"] == ativo:      # desconta o próprio lançamento em edição
+                    posicao -= item["quantidade"] * (1 if item["tipo"] == "compra" else -1)
+            if not ativo:
+                st.error("escolha um ativo.")
+            elif qtd <= 0 or preco <= 0:
+                st.error("informe quantidade e preço.")
+            elif tipo == "venda" and qtd > posicao + 1e-9:
+                st.error(f"venda maior que a posição ({fmt_qtd(max(posicao, 0))} de {ativo}).")
+            elif item:
+                atualizar_investimento((item["data"], item["tipo"], item["ativo"], item["quantidade"], item["total"]),
+                                       data_lanc, tipo, ativo, classes[ativo], qtd, preco, qtd * preco)
+                _fechar("alterado!")
+            else:
+                salvar_investimento(data_lanc, tipo, ativo, classes[ativo], qtd, preco)
+                _fechar("registrado!")
+
+
+# classificação do ativo novo num campo só: (rótulo, classe, tipo, indexador, país)
+TIPOS_ATIVO = ([("FII de tijolo", "FII", "tijolo", None, None),
+                ("FII de papel · CDI", "FII", "papel", "CDI", None),
+                ("FII de papel · IPCA", "FII", "papel", "IPCA", None)]
+               + [(f"ETF · {p}", "ETF", None, None, p) for p in PAISES_ETF])
+
+
+@st.dialog("novo ativo")
+def dialogo_novo_ativo(ativos_inv):
+    with st.form("form_ativo", border=False):
+        col_tk, col_tp = st.columns([1, 1.6])
+        with col_tk:
+            ticker = st.text_input("ticker", placeholder="ex.: HGLG11")
+        with col_tp:
+            i_tipo = st.selectbox("tipo", options=list(range(len(TIPOS_ATIVO))), index=0,
+                                  format_func=lambda i: TIPOS_ATIVO[i][0])
+        enviado = st.form_submit_button("cadastrar ativo", use_container_width=True)
+        if enviado:
+            ticker = (ticker or "").strip().upper()
+            _, classe, tipo, indexador, pais = TIPOS_ATIVO[i_tipo]
+            if not re.fullmatch(r"[A-Z]{4}\d{1,2}", ticker):
+                st.error("ticker inválido — use o formato da B3 (ex.: HGLG11).")
+            elif ticker in dict(ativos_inv):
+                st.error(f"{ticker} já está na lista.")
+            else:
+                salvar_ativo_novo(ticker, classe, tipo, indexador, pais)
+                _fechar(f"{ticker} cadastrado!")
+
+
+if st.session_state.get("_msg"):
+    st.toast(st.session_state.pop("_msg"))
+
+aba_lancar, aba_receitas, aba_invest, aba_orc = st.tabs(
+    ["despesas", "receitas", "investimentos", "orçamento"]
+)
+
+# ───────────────────────── ABA: DESPESAS ─────────────────────────
+# painel da fatura · botão do formulário · barras por categoria · parcelamentos · histórico
+
+with aba_lancar:
+    render_nav_mes("desp")
+    ref = st.session_state["mes_ref"]
+    df_mes = filtrar_mes(carregar_lancamentos(), ref.year, ref.month)
+    render_cards_limite(df_mes, limite_mensal, ref)
+    st.write("")
+    with st.container(key="novo_despesa"):
+        if st.button("+ despesa", use_container_width=True):
+            dialogo_despesa()
+    st.write("")
+
+    render_barras_categorias(df_mes, limite_mensal, df_cat)
 
     abertos = parcelamentos_abertos(carregar_lancamentos())
     if abertos:
@@ -1023,31 +1243,14 @@ with aba_lancar:
                 st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>"
                             f"{formatar_brl(sum(v for _, _, v in fut))}</div>", unsafe_allow_html=True)
 
-with aba_dash:
-    render_nav_mes("dash")
-
-    ref = st.session_state["mes_ref"]
-    df_lanc = carregar_lancamentos()
-    df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
-
-    render_grafico_categorias(df_mes, limite_mensal, df_cat, chave="dash", mes_ref=ref)
-
-with aba_hist:
-    render_nav_mes("hist")
-
-    ref = st.session_state["mes_ref"]
-    df_lanc = carregar_lancamentos()
-    df_mes = filtrar_mes(df_lanc, ref.year, ref.month)
-    # despesas no pix entram na mesma lista (marcadas), sem mexer nos totais da fatura
+    # histórico do mês: cartão + pix na mesma lista (o pix fica marcado e fora dos totais da fatura)
     df_pix_h = filtrar_mes(carregar_pix(), ref.year, ref.month)
     df_pix_h = df_pix_h[df_pix_h["tipo"] == "saida"] if not df_pix_h.empty else df_pix_h
-
+    st.write("")
     if df_mes.empty and df_pix_h.empty:
-        st.caption("nenhum lançamento neste mês.")
+        st.caption("nenhuma despesa neste mês.")
     else:
-        # inverte a ordem original (último inserido vira o primeiro) e então
-        # ordena por data de forma estável — dentro do mesmo dia, mantém o
-        # último lançado em primeiro lugar, em vez da ordem de inserção crua.
+        # inverte a ordem original (último inserido primeiro) e ordena por data de forma estável
         _cart_h = df_mes.iloc[::-1].assign(pagamento="cartão")
         _pix_h = (df_pix_h.iloc[::-1][["data", "categoria", "descricao", "valor"]].assign(pagamento="pix")
                   if not df_pix_h.empty else df_pix_h)
@@ -1056,64 +1259,28 @@ with aba_hist:
         mapa_nomes = dict(zip(df_cat["id"], df_cat["nome"]))
         for idx_row, (_, r) in enumerate(df_mes_ordenado.iterrows()):
             nome_cat = mapa_nomes.get(r["categoria"], "sem categoria").lower()
-            eh_pix = r["pagamento"] == "pix"
-            item_id = f"{idx_row}_{r['data']}_{r['categoria']}_{r['valor']}_{r['pagamento']}"
-            pendente_key = f"pendente_del_{item_id}"
+            it = {"pagamento": r["pagamento"], "data": r["data"], "categoria": r["categoria"],
+                  "descricao": str(r["descricao"] or ""), "valor": float(r["valor"])}
 
-            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
-            with col_desc:
-                st.markdown(f"**{r['descricao'] or nome_cat}**  \n<span style='color:#888;font-size:12px;'>{nome_cat}{' · pix' if eh_pix else ''} · {r['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
-            with col_acao:
-                if not st.session_state.get(pendente_key):
-                    if st.button("✕", key=f"del_{item_id}", use_container_width=True):
-                        st.session_state[pendente_key] = True
-                        st.rerun()
-            with col_val:
-                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>− {formatar_brl(r['valor'])}</div>", unsafe_allow_html=True)
+            def _excluir(it=it):
+                if it["pagamento"] == "pix":
+                    excluir_pix(it["data"].isoformat(), "saida", it["categoria"], it["descricao"], it["valor"])
+                else:
+                    excluir_lancamento(it["data"].isoformat(), it["categoria"], it["descricao"], it["valor"])
 
-            if st.session_state.get(pendente_key):
-                st.markdown(
-                    "<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>excluir este lançamento?</div>",
-                    unsafe_allow_html=True,
-                )
-                col_confirma, col_cancela = st.columns(2)
-                with col_confirma:
-                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                        if eh_pix:
-                            excluir_pix(r["data"].isoformat(), "saida", r["categoria"], r["descricao"], r["valor"])
-                        else:
-                            excluir_lancamento(r["data"].isoformat(), r["categoria"], r["descricao"], r["valor"])
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun(scope="app")
-                with col_cancela:
-                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun()
+            linha_item(
+                f"d{idx_row}_{it['data']}_{it['categoria']}_{it['valor']}_{it['pagamento']}",
+                it["descricao"] or nome_cat,
+                f"{nome_cat}{' · pix' if it['pagamento'] == 'pix' else ''} · {it['data'].strftime('%d/%m/%y')}",
+                f"− {formatar_brl(it['valor'])}",
+                lambda it=it: dialogo_despesa(it), _excluir, "excluir este lançamento?")
 
-        csv = df_mes_ordenado[["data", "categoria", "descricao", "valor", "pagamento"]].rename(columns={"data": "data", "categoria": "categoria", "descricao": "descrição", "valor": "valor (R$)"})
-        st.download_button(
-            "↓ exportar histórico (csv)",
-            csv.to_csv(index=False, sep=";").encode("utf-8-sig"),
-            file_name=f"fatura_{ref.year}_{ref.month:02d}.csv",
-            use_container_width=True,
-        )
+        st.write("")
+        csv = df_mes_ordenado[["data", "categoria", "descricao", "valor", "pagamento"]].rename(
+            columns={"descricao": "descrição", "valor": "valor (R$)"}).to_csv(index=False).encode("utf-8")
+        st.download_button("exportar csv", csv, f"fatura_{mes_label(ref).replace('/', '_')}.csv", "text/csv")
 
 # ───────────────────────── ABA: RECEITAS ─────────────────────────
-# nota fiscal e reembolso → aba pj_notas da carteira (SmartWallet calcula o fluxo PJ → PF);
-# pix → aba pix desta planilha (tipo entrada), fora da fatura do cartão.
-
-def render_cards_receitas(notas_mes, reemb_mes, pix_mes):
-    """painel do mês: notas fiscais · reembolsos · pix (mesmo visual do painel da fatura)"""
-    def bloco(rotulo, valor, alinhar):
-        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
-                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
-                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
-    st.markdown(
-        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
-        + bloco("notas fiscais (R&#36;)", notas_mes, "start") + bloco("reembolsos (R&#36;)", reemb_mes, "center")
-        + bloco("pix (R&#36;)", pix_mes, "end") + "</div></div>", unsafe_allow_html=True)
-
 
 with aba_receitas:
     render_nav_mes("rec")
@@ -1129,104 +1296,44 @@ with aba_receitas:
     df_pix_rec = df_pix_rec[df_pix_rec["tipo"] == "entrada"] if not df_pix_rec.empty else df_pix_rec
 
     _soma = lambda d, t: float(d[d["tipo"] == t]["valor"].sum()) if not d.empty else 0.0
-    render_cards_receitas(_soma(df_notas_mes, "nota fiscal"), _soma(df_notas_mes, "reembolso"),
-                          float(df_pix_rec["valor"].sum()) if not df_pix_rec.empty else 0.0)
+    render_cards_3([("notas fiscais (R$)", _soma(df_notas_mes, "nota fiscal")),
+                    ("reembolsos (R$)", _soma(df_notas_mes, "reembolso")),
+                    ("pix (R$)", float(df_pix_rec["valor"].sum()) if not df_pix_rec.empty else 0.0)])
     if erro_notas:
         st.warning(erro_notas)
     st.write("")
-
-    @st.fragment
-    def form_receita():
-        with st.form("form_receita", clear_on_submit=True):
-            tipo = st.selectbox("tipo", options=RECEITA_TIPOS, index=0)
-            col_data, col_val = st.columns([1, 1])
-            with col_data:
-                data_lanc = st.date_input("data", value=date.today(), format="DD/MM/YYYY")
-            with col_val:
-                valor_txt = st.text_input("valor (R$)", placeholder="0,00")
-            descricao = st.text_input("descrição")
-            ativar_campos_formulario("valor (R$)")
-            enviado = st.form_submit_button("registrar receita", use_container_width=True)
-            if enviado:
-                valor = parse_valor(valor_txt)
-                if valor <= 0:
-                    st.error("informe um valor válido.")
-                elif tipo == "pix":
-                    salvar_pix(data_lanc.isoformat(), "entrada", "receita", descricao, valor)
-                    st.success("registrado!")
-                    st.rerun(scope="app")
-                elif erro_notas:
-                    st.error(erro_notas)
-                else:
-                    salvar_nota(tipo, data_lanc, valor, descricao)
-                    if tipo == "nota fiscal":       # nota é recebida (e paga DAS) no mês seguinte
-                        cx = date(data_lanc.year + (data_lanc.month == 12), data_lanc.month % 12 + 1, 1)
-                        st.success(f"registrada! entra no caixa de {MESES3[cx.month - 1]}/{str(cx.year)[2:]}")
-                    else:
-                        st.success("registrado!")
-                    st.rerun(scope="app")
-
-    form_receita()
+    with st.container(key="novo_receita"):
+        if st.button("+ receita", use_container_width=True):
+            dialogo_receita(erro_notas=erro_notas)
     st.write("")
 
     itens = []
     if not df_notas_mes.empty:
         for _, r in df_notas_mes.iterrows():
-            itens.append({"origem": "nota", "tipo": r["tipo"], "data": r["data"], "valor": r["valor"],
+            itens.append({"origem": "nota", "tipo": r["tipo"], "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "data_txt": r["data_txt"]})
     if not df_pix_rec.empty:
         for _, r in df_pix_rec.iloc[::-1].iterrows():
-            itens.append({"origem": "pix", "tipo": "pix", "data": r["data"], "valor": r["valor"],
+            itens.append({"origem": "pix", "tipo": "pix", "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "categoria": r["categoria"]})
     if not itens:
         st.caption("nenhuma receita neste mês.")
     for idx_row, it in enumerate(sorted(itens, key=lambda x: x["data"], reverse=True)):
-        item_id = f"rec_{idx_row}_{it['data']}_{it['tipo']}_{it['valor']}"
-        pendente_key = f"pendente_del_{item_id}"
-        col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
-        with col_desc:
-            st.markdown(f"**{it['descricao'] or it['tipo']}**  \n<span style='color:#888;font-size:12px;'>"
-                        f"{it['tipo']} · {it['data'].strftime('%d/%m/%y')}</span>", unsafe_allow_html=True)
-        with col_acao:
-            if not st.session_state.get(pendente_key):
-                if st.button("✕", key=f"del_{item_id}", use_container_width=True):
-                    st.session_state[pendente_key] = True
-                    st.rerun()
-        with col_val:
-            st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:#1D9E75;'>"
-                        f"+ {formatar_brl(it['valor'])}</div>", unsafe_allow_html=True)
-        if st.session_state.get(pendente_key):
-            st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
-                        "excluir esta receita?</div>", unsafe_allow_html=True)
-            col_confirma, col_cancela = st.columns(2)
-            with col_confirma:
-                if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                    if it["origem"] == "pix":
-                        excluir_pix(it["data"].isoformat(), "entrada", it["categoria"], it["descricao"], it["valor"])
-                    else:
-                        excluir_nota(it["tipo"], it["data_txt"], it["valor"], it["descricao"])
-                    st.session_state.pop(pendente_key, None)
-                    st.rerun(scope="app")
-            with col_cancela:
-                if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
-                    st.session_state.pop(pendente_key, None)
-                    st.rerun()
+        def _excluir_rec(it=it):
+            if it["origem"] == "pix":
+                excluir_pix(it["data"].isoformat(), "entrada", it["categoria"], it["descricao"], it["valor"])
+            else:
+                excluir_nota(it["tipo"], it["data_txt"], it["valor"], it["descricao"])
+
+        linha_item(
+            f"r{idx_row}_{it['data']}_{it['tipo']}_{it['valor']}",
+            it["descricao"] or it["tipo"], f"{it['tipo']} · {it['data'].strftime('%d/%m/%y')}",
+            f"<span style='color:#1D9E75;'>+ {formatar_brl(it['valor'])}</span>",
+            lambda it=it: dialogo_receita(it, erro_notas), _excluir_rec, "excluir esta receita?")
 
 # ───────────────────────── ABA: INVESTIMENTOS ─────────────────────────
 # compras e vendas da carteira: gravam na aba lancamentos da planilha da carteira,
 # no mesmo formato de antes — o SmartWallet só lê.
-
-def render_cards_invest(aportes, vendas, media_6m):
-    def bloco(rotulo, valor, alinhar):
-        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
-                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
-                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
-    st.markdown(
-        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
-        + bloco("compras (R&#36;)", aportes, "start") + bloco("vendas (R&#36;)", vendas, "center")
-        + bloco("média 6m (R&#36;)", media_6m, "end") + "</div></div>", unsafe_allow_html=True)
-
 
 with aba_invest:
     render_nav_mes("inv")
@@ -1247,115 +1354,38 @@ with aba_invest:
         _m = mes_anterior(_m)
         _d = filtrar_mes(df_inv, _m.year, _m.month)
         _liq.append(_tot(_d, "compra") - _tot(_d, "venda"))
-    render_cards_invest(_tot(df_inv_mes, "compra"), _tot(df_inv_mes, "venda"), sum(_liq) / 6)
+    render_cards_3([("compras (R$)", _tot(df_inv_mes, "compra")), ("vendas (R$)", _tot(df_inv_mes, "venda")),
+                    ("média 6m (R$)", sum(_liq) / 6)])
     if erro_inv:
         st.warning(erro_inv)
     st.write("")
-
-    @st.fragment
-    def form_investimento():
-        nomes = [a for a, _ in ativos_inv]
-        classes = dict(ativos_inv)
-        with st.form("form_invest", clear_on_submit=True):
-            col_tipo, col_ativo = st.columns([1, 1.6])
-            with col_tipo:
-                tipo = st.selectbox("tipo", options=["compra", "venda"], index=0)
-            with col_ativo:
-                ativo = st.selectbox("ativo", options=nomes, index=0 if nomes else None)
-            col_data, col_qtd = st.columns([1, 1])
-            with col_data:
-                data_lanc = st.date_input("data", value=date.today(), max_value=date.today(), format="DD/MM/YYYY")
-            with col_qtd:
-                qtd_txt = st.text_input("quantidade", placeholder="ex.: 10")
-            preco_txt = st.text_input("preço unitário (R$)", placeholder="0,00")
-            ativar_campos_formulario("preço unitário (R$)")
-            enviado = st.form_submit_button("registrar investimento", use_container_width=True)
-            if enviado:
-                qtd = _num_br(qtd_txt) or 0.0
-                preco = parse_valor(preco_txt)
-                posicao = 0.0
-                if ativo and not df_inv.empty:
-                    _a = df_inv[df_inv["ativo"] == ativo]
-                    posicao = float(_a[_a["tipo"] == "compra"]["quantidade"].sum()
-                                    - _a[_a["tipo"] == "venda"]["quantidade"].sum())
-                if erro_inv:
-                    st.error(erro_inv)
-                elif not ativo:
-                    st.error("escolha um ativo.")
-                elif qtd <= 0 or preco <= 0:
-                    st.error("informe quantidade e preço.")
-                elif tipo == "venda" and qtd > posicao + 1e-9:
-                    st.error(f"venda maior que a posição ({fmt_qtd(posicao)} de {ativo}).")
-                else:
-                    salvar_investimento(data_lanc, tipo, ativo, classes[ativo], qtd, preco)
-                    st.success("registrado!")
-                    st.rerun(scope="app")
-
-    form_investimento()
-
-    with st.expander("novo ativo"):
-        col_tk, col_cl = st.columns([1, 1])
-        with col_tk:
-            # a chave muda a cada cadastro, para o campo voltar vazio
-            novo_ticker = st.text_input("ticker", placeholder="ex.: HGLG11",
-                                        key=f"novo_ticker_{st.session_state.get('novo_n', 0)}").strip().upper()
-        with col_cl:
-            novo_classe = st.selectbox("classe", ["FII", "ETF"], key="novo_classe")
-        novo_tipo = novo_idx = novo_pais = None
-        if novo_classe == "FII":
-            novo_tipo = st.selectbox("tipo do FII", ["tijolo", "papel"], key="novo_tipo")
-            if novo_tipo == "papel":
-                novo_idx = st.selectbox("indexador", ["CDI", "IPCA"], key="novo_idx")
-        else:
-            novo_pais = st.selectbox("país", PAISES_ETF, key="novo_pais")
-        if st.button("cadastrar ativo", use_container_width=True):
-            if not re.fullmatch(r"[A-Z]{4}\d{1,2}", novo_ticker or ""):
-                st.error("ticker inválido — use o formato da B3 (ex.: HGLG11).")
-            elif novo_ticker in dict(ativos_inv):
-                st.error(f"{novo_ticker} já está na lista.")
-            elif erro_inv:
-                st.error(erro_inv)
-            else:
-                salvar_ativo_novo(novo_ticker, novo_classe, novo_tipo, novo_idx, novo_pais)
-                st.session_state["novo_n"] = st.session_state.get("novo_n", 0) + 1
-                st.rerun()
-
+    with st.container(key="novo_invest"):
+        col_inv, col_atv = st.columns([1.8, 1])
+        with col_inv:
+            if st.button("+ investimento", use_container_width=True, disabled=bool(erro_inv)):
+                dialogo_investimento(df_inv, ativos_inv)
+        with col_atv:
+            if st.button("+ ativo", use_container_width=True, disabled=bool(erro_inv)):
+                dialogo_novo_ativo(ativos_inv)
     st.write("")
+
     if df_inv_mes.empty:
         st.caption("nenhum investimento neste mês.")
     else:
         df_inv_ord = df_inv_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
         for idx_row, (_, r) in enumerate(df_inv_ord.iterrows()):
-            compra = r["tipo"] == "compra"
-            item_id = f"inv_{idx_row}_{r['data']}_{r['ativo']}_{r['total']}"
-            pendente_key = f"pendente_del_{item_id}"
-            col_desc, col_acao, col_val = st.columns([3.6, 0.9, 1.8])
-            with col_desc:
-                st.markdown(
-                    f"**{r['ativo']}**  \n<span style='color:#888;font-size:12px;'>{r['tipo']} · "
-                    f"{fmt_qtd(r['quantidade'])} × {fmt_brl2(r['preco'])} · {r['data'].strftime('%d/%m/%y')}</span>"
-                    .replace("$", "&#36;"), unsafe_allow_html=True)
-            with col_acao:
-                if not st.session_state.get(pendente_key):
-                    if st.button("✕", key=f"del_{item_id}", use_container_width=True):
-                        st.session_state[pendente_key] = True
-                        st.rerun()
-            with col_val:
-                st.markdown(f"<div style='text-align:right;padding-top:0.5rem;color:{'#1D9E75' if compra else 'inherit'};'>"
-                            f"{'+' if compra else '−'} {formatar_brl(r['total'])}</div>", unsafe_allow_html=True)
-            if st.session_state.get(pendente_key):
-                st.markdown("<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>"
-                            "excluir este investimento?</div>", unsafe_allow_html=True)
-                col_confirma, col_cancela = st.columns(2)
-                with col_confirma:
-                    if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                        excluir_investimento(r["data"], r["tipo"], r["ativo"], r["quantidade"], r["total"])
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun(scope="app")
-                with col_cancela:
-                    if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
-                        st.session_state.pop(pendente_key, None)
-                        st.rerun()
+            it = {"data": r["data"], "tipo": r["tipo"], "ativo": r["ativo"],
+                  "quantidade": float(r["quantidade"]), "preco": float(r["preco"]), "total": float(r["total"])}
+            compra = it["tipo"] == "compra"
+            linha_item(
+                f"i{idx_row}_{it['data']}_{it['ativo']}_{it['total']}",
+                it["ativo"],
+                f"{it['tipo']} · {fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])} · {it['data'].strftime('%d/%m/%y')}",
+                (f"<span style='color:#1D9E75;'>+ {formatar_brl(it['total'])}</span>" if compra
+                 else f"− {formatar_brl(it['total'])}"),
+                lambda it=it: dialogo_investimento(df_inv, ativos_inv, it),
+                lambda it=it: excluir_investimento(it["data"], it["tipo"], it["ativo"], it["quantidade"], it["total"]),
+                "excluir este investimento?")
 
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
