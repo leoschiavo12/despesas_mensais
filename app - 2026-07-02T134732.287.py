@@ -2,15 +2,16 @@
 Controle de Fatura — app.py
 Streamlit + Google Sheets (mesmo padrão arquitetural do SmartWallet)
 
-CONFIGURAÇÃO NECESSÁRIA ANTES DO DEPLOY:
-1. Criar uma planilha Google em branco, copiar o ID da URL e colar em SPREADSHEET_ID abaixo.
-2. Compartilhar essa planilha (permissão de Editor) com a service account:
-   carteira-python@ccmensal.iam.gserviceaccount.com
-3. Nos Secrets do Streamlit Cloud, adicionar o bloco [gcp_service_account] com o JSON da
-   mesma service account já usada no SmartWallet.
-4. Rodar o app uma vez — ele cria sozinho as abas 'lancamentos', 'categorias' e 'config'
-   com os cabeçalhos e categorias padrão, se ainda não existirem. A aba 'pix' (entradas e
-   saídas via PIX) também é criada sozinha e fica fora da fatura — o SmartWallet lê dela.
+CONFIGURAÇÃO (Secrets do Streamlit Cloud) — nenhum ID ou dado pessoal fica no código:
+  [gcp_service_account]   → JSON da service account (a mesma do SmartWallet)
+  [google_sheets]
+  spreadsheet_id          = "ID da planilha deste app"
+  carteira_spreadsheet_id = "ID da planilha da carteira (SmartWallet)"
+As duas planilhas precisam estar compartilhadas (Editor) com a service account.
+
+Na primeira execução o app cria sozinho as abas 'lancamentos', 'categorias', 'config' e 'pix'.
+Parcelas usam a 5ª coluna 'parcelamento' de 'lancamentos'; receitas da PJ e investimentos
+gravam na planilha da carteira, que o SmartWallet só lê.
 """
 
 import streamlit as st
@@ -25,13 +26,14 @@ from datetime import datetime, date, timedelta
 
 # ───────────────────────── CONFIG ─────────────────────────
 
-SPREADSHEET_ID = "1JvAXJm6ThknEv3j8xd8Q1xAhLGnrGLt3MRGgsXBIsow"
+_GS = st.secrets.get("google_sheets", {})
+SPREADSHEET_ID = _GS.get("spreadsheet_id")
 
 ABA_LANCAMENTOS = "lancamentos"
 ABA_CATEGORIAS = "categorias"
 ABA_CONFIG = "config"
 # notas fiscais e reembolsos da PJ ficam na planilha da carteira (SmartWallet), aba pj_notas
-CARTEIRA_SPREADSHEET_ID = st.secrets.get("carteira_spreadsheet_id", "1FiEMHBDp3UHPP3QuZXPuWsiga9SOGRlueNIC7laPTGo")
+CARTEIRA_SPREADSHEET_ID = _GS.get("carteira_spreadsheet_id")
 ABA_NOTAS = "pj_notas"
 RECEITA_TIPOS = ["nota fiscal", "reembolso", "pix"]
 MESES3 = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
@@ -49,20 +51,25 @@ MAX_PARCELAS = 24
 FIXED_ID = "parcel"
 
 CATEGORIAS_PADRAO = [
-    {"id": "alim", "nome": "alimentação", "cor": "#D85A30", "valor_alvo": 1700, "fixo": False},
-    {"id": "transp", "nome": "transporte", "cor": "#BA7517", "valor_alvo": 850, "fixo": False},
-    {"id": "lazer", "nome": "lazer", "cor": "#D4537E", "valor_alvo": 425, "fixo": False},
-    {"id": "cuidado", "nome": "cuidado pessoal", "cor": "#7F77DD", "valor_alvo": 340, "fixo": False},
-    {"id": "super", "nome": "supermercado", "cor": "#639922", "valor_alvo": 680, "fixo": False},
-    {"id": "assina", "nome": "assinaturas", "cor": "#888780", "valor_alvo": 170, "fixo": False},
-    {"id": "saude", "nome": "saúde", "cor": "#1D9E75", "valor_alvo": 340, "fixo": False},
-    {"id": "outros", "nome": "outros", "cor": "#666666", "valor_alvo": 340, "fixo": False},
+    {"id": "alim", "nome": "alimentação", "cor": "#D85A30", "valor_alvo": 0, "fixo": False},
+    {"id": "transp", "nome": "transporte", "cor": "#BA7517", "valor_alvo": 0, "fixo": False},
+    {"id": "lazer", "nome": "lazer", "cor": "#D4537E", "valor_alvo": 0, "fixo": False},
+    {"id": "cuidado", "nome": "cuidado pessoal", "cor": "#7F77DD", "valor_alvo": 0, "fixo": False},
+    {"id": "super", "nome": "supermercado", "cor": "#639922", "valor_alvo": 0, "fixo": False},
+    {"id": "assina", "nome": "assinaturas", "cor": "#888780", "valor_alvo": 0, "fixo": False},
+    {"id": "saude", "nome": "saúde", "cor": "#1D9E75", "valor_alvo": 0, "fixo": False},
+    {"id": "outros", "nome": "outros", "cor": "#666666", "valor_alvo": 0, "fixo": False},
     {"id": FIXED_ID, "nome": "parcelamentos", "cor": "#E5B800", "valor_alvo": 0, "fixo": True},
 ]
 
-LIMITE_PADRAO = 8500
+LIMITE_PADRAO = 5000   # só para planilha nova; o valor real fica na aba config
 
 st.set_page_config(page_title="controle de fatura", layout="centered")
+
+if not SPREADSHEET_ID or not CARTEIRA_SPREADSHEET_ID:
+    st.error("faltam os IDs das planilhas nos Secrets: bloco [google_sheets] com "
+             "spreadsheet_id e carteira_spreadsheet_id.")
+    st.stop()
 
 # Impede que st.columns empilhe verticalmente em telas estreitas (celular).
 # Sem isso, qualquer layout lado a lado (setas de navegação, valor + botão de
@@ -461,8 +468,9 @@ def carregar_ativos():
         ws = _ws_carteira(ABA_ATIVOS)
         if ws is not None:
             for r in ws.get_all_values()[1:]:
-                if r and r[0].strip() and len(r) > 1 and r[1].strip():
-                    info[r[0].strip().upper()] = r[1].strip()
+                # linhas com ticker_atual são nomes antigos (de-para) e não entram na lista
+                if r and r[0].strip() and len(r) > 1 and r[1].strip() and not (len(r) > 5 and r[5].strip()):
+                    info.setdefault(r[0].strip().upper(), r[1].strip())
         df = carregar_investimentos()
         classes, posicao = {}, {}
         for _, r in df.iterrows():
@@ -515,7 +523,7 @@ def excluir_investimento(data_lanc, tipo, ativo, qtd, total):
 
 def salvar_ativo_novo(ativo, classe, tipo, indexador, pais):
     """cadastra (ou atualiza) o ativo na aba ativos_info da carteira — classificação usada pelo SmartWallet"""
-    ws = _ws_carteira(ABA_ATIVOS, ["ativo", "classe", "tipo", "indexador", "pais"])
+    ws = _ws_carteira(ABA_ATIVOS, ["ativo", "classe", "tipo", "indexador", "pais", "ticker_atual"])
     nova = [ativo, classe, tipo or "", indexador or "", pais or ""]
     for i, r in enumerate(ws.get_all_values()[1:], start=2):
         if r and r[0].strip().upper() == ativo:
@@ -1153,8 +1161,9 @@ def dialogo_investimento(df_inv, ativos_inv, item=None):
     with st.form("form_invest_edit" if item else "form_invest", border=False):
         col_tipo, col_ativo = st.columns([1, 1.6])
         with col_tipo:
-            tipo = st.selectbox("tipo", options=["compra", "venda"],
-                                index=1 if item and item["tipo"] == "venda" else 0)
+            # lançamentos de outro tipo já existentes na planilha (ex.: dividendo manual) mantêm o tipo
+            _tipos = ["compra", "venda"] + ([item["tipo"]] if item and item["tipo"] not in ("compra", "venda") else [])
+            tipo = st.selectbox("tipo", options=_tipos, index=_tipos.index(item["tipo"]) if item else 0)
         with col_ativo:
             ativo = st.selectbox("ativo", options=nomes,
                                  index=(nomes.index(item["ativo"]) if item and item["ativo"] in nomes
@@ -1199,7 +1208,9 @@ def dialogo_investimento(df_inv, ativos_inv, item=None):
 TIPOS_ATIVO = ([("FII de tijolo", "FII", "tijolo", None, None),
                 ("FII de papel · CDI", "FII", "papel", "CDI", None),
                 ("FII de papel · IPCA", "FII", "papel", "IPCA", None)]
-               + [(f"ETF · {p}", "ETF", None, None, p) for p in PAISES_ETF])
+               + [(f"ETF · {p}", "ETF", None, None, p) for p in PAISES_ETF]
+               + [("ETF de renda fixa · CDI", "ETF", "renda fixa", "CDI", "Brasil"),
+                  ("ETF de renda fixa · IPCA", "ETF", "renda fixa", "IPCA", "Brasil")])
 
 
 @st.dialog("novo ativo")
@@ -1207,7 +1218,7 @@ def dialogo_novo_ativo(ativos_inv):
     with st.form("form_ativo", border=False):
         col_tk, col_tp = st.columns([1, 1.6])
         with col_tk:
-            ticker = st.text_input("ticker", placeholder="ex.: HGLG11")
+            ticker = st.text_input("ticker", placeholder="ex.: ABCD11")
         with col_tp:
             i_tipo = st.selectbox("tipo", options=list(range(len(TIPOS_ATIVO))), index=0,
                                   format_func=lambda i: TIPOS_ATIVO[i][0])
@@ -1216,7 +1227,7 @@ def dialogo_novo_ativo(ativos_inv):
             ticker = (ticker or "").strip().upper()
             _, classe, tipo, indexador, pais = TIPOS_ATIVO[i_tipo]
             if not re.fullmatch(r"[A-Z]{4}\d{1,2}", ticker):
-                st.error("ticker inválido — use o formato da B3 (ex.: HGLG11).")
+                st.error("ticker inválido — use o formato da B3 (ex.: ABCD11).")
             elif ticker in dict(ativos_inv):
                 st.error(f"{ticker} já está na lista.")
             else:
@@ -1406,7 +1417,7 @@ with aba_invest:
                 it["ativo"],
                 f"{it['tipo']} · {fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])} · {it['data'].strftime('%d/%m/%y')}",
                 (f"<span style='color:#1D9E75;'>+ {formatar_brl(it['total'])}</span>" if compra
-                 else f"− {formatar_brl(it['total'])}"),
+                 else (f"− {formatar_brl(it['total'])}" if it["tipo"] == "venda" else formatar_brl(it["total"]))),
                 lambda it=it: dialogo_investimento(df_inv, ativos_inv, it),
                 lambda it=it: excluir_investimento(it["data"], it["tipo"], it["ativo"], it["quantidade"], it["total"]),
                 "excluir este investimento?")
