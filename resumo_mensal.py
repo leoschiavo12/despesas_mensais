@@ -60,9 +60,9 @@ PJ_PAR_TEXTO = {"fies_fim", "cartao_real_desde"}
 # ───────────────────────── UTILITÁRIOS ─────────────────────────
 
 def brl(v, sinal=False):
-    """R$ 1.234,56 · com sinal=True, negativo vira '- R$ ...' (Helvetica não tem o '−')"""
-    s = "R$ " + f"{abs(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return ("- " + s) if (sinal and v < -0.004) else s
+    """R$1.234,56 · com sinal=True, negativo vira "-R$..." (Helvetica não tem o "−")"""
+    s = "R$" + f"{abs(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return ("-" + s) if (sinal and v < -0.004) else s
 
 
 def pct(p):
@@ -361,8 +361,9 @@ def montar_dados(ref):
         im = do_mes(cart["inv"], ref)
         im = im[im["tipo"].isin(["compra", "venda"])] if not im.empty else im
         tot = lambda d, t: soma(d[d["tipo"] == t], "total") if not d.empty else 0.0
-        liq6 = [tot(do_mes(cart["inv"], somar_meses(ref, -i)), "compra")
-                - tot(do_mes(cart["inv"], somar_meses(ref, -i)), "venda") for i in range(1, 7)]
+        # do ponto de vista da conta: compra é saída, venda é entrada (saldo = vendas − compras)
+        liq6 = [tot(do_mes(cart["inv"], somar_meses(ref, -i)), "venda")
+                - tot(do_mes(cart["inv"], somar_meses(ref, -i)), "compra") for i in range(1, 7)]
         inv = {"lanc": im.sort_values("data") if not im.empty else im,
                "compras": tot(im, "compra"), "vendas": tot(im, "venda"), "media6": sum(liq6) / 6}
 
@@ -492,7 +493,7 @@ def gerar_pdf(caminho, D):
            ["parcelamentos", brl(D["parcel"])],
            ["total", brl(D["total"])],
            ["mês anterior", brl(D["total_ant"])],
-           ["variação", f"{'+' if delta >= 0 else '-'} {brl(abs(delta))}"
+           ["variação", f"{'+' if delta >= 0 else '-'}{brl(abs(delta))}"
                         + (f" ({pct(delta / D['total_ant'] * 100)})" if D["total_ant"] > 0 else "")]]
     el += [Paragraph(f"fatura de {MESES[ref.month - 1]}", S_SEC),
            lista(lin, [11 * cm, 6 * cm], {(1, 4): VERMELHO if delta > 0 else VERDE})]
@@ -503,7 +504,7 @@ def gerar_pdf(caminho, D):
                 cores[(3, len(lin))] = VERMELHO
             lin.append([c["nome"], brl(c["gasto"]), brl(c["orc"]),
                         pct(c["uso"]) if c["uso"] is not None else "—",
-                        f"{'+' if c['delta'] >= 0 else '-'} {brl(abs(c['delta']))}"])
+                        f"{'+' if c['delta'] >= 0 else '-'}{brl(abs(c['delta']))}"])
         el += [Spacer(1, 8), lista(lin, [5 * cm, 3 * cm, 3 * cm, 2.2 * cm, 3.8 * cm], cores,
                                    cab=["categoria", "gasto", "orçamento", "% usado", "vs. mês ant."],
                                    alinhar_dir=[1, 2, 3, 4])]
@@ -534,12 +535,12 @@ def gerar_pdf(caminho, D):
     # ── investimentos ──
     I = D["inv"]
     if I is not None:
-        lin = [["compras", brl(I["compras"])], ["vendas", brl(I["vendas"])],
+        lin = [["compras", brl(-I["compras"], True)], ["vendas", brl(I["vendas"])],
                ["média dos últimos 6 meses", brl(I["media6"], True)],
-               ["saldo", brl(I["compras"] - I["vendas"], True)]]
+               ["saldo", brl(I["vendas"] - I["compras"], True)]]
         el += [Paragraph(f"investimentos em {MESES[ref.month - 1]}", S_SEC),
-               lista(lin, [11 * cm, 6 * cm], {(1, 0): VERDE if I["compras"] else CINZA,
-                                             (1, 1): VERMELHO if I["vendas"] else CINZA}, total=True)]
+               lista(lin, [11 * cm, 6 * cm], {(1, 0): VERMELHO if I["compras"] else CINZA,
+                                             (1, 1): VERDE if I["vendas"] else CINZA}, total=True)]
         if not I["lanc"].empty:
             lin = [[r["data"].strftime("%d/%m"), r["ativo"], r["tipo"],
                     f"{r['quantidade']:.8f}".rstrip("0").rstrip(".").replace(".", ","),
@@ -612,7 +613,7 @@ def corpo_html(D):
     h.append(bloco(f"fatura de {MESES[ref.month - 1]}", [
         ("total da fatura", brl(D["total"]), "#111"),
         ("limite disponível" if disp >= 0 else "limite excedido", brl(abs(disp)), VERDE if disp >= 0 else VERMELHO),
-        ("vs. mês anterior", f"{'+' if D['total'] >= D['total_ant'] else '-'} {brl(abs(D['total'] - D['total_ant']))}",
+        ("vs. mês anterior", f"{'+' if D['total'] >= D['total_ant'] else '-'}{brl(abs(D['total'] - D['total_ant']))}",
          VERMELHO if D["total"] > D["total_ant"] else VERDE)]))
     if F:
         h.append(bloco(f"movimentação da conta em {MESES[ref.month - 1]}",
@@ -622,12 +623,12 @@ def corpo_html(D):
     if D["inv"] is not None:
         I = D["inv"]
         h.append(bloco(f"investimentos em {MESES[ref.month - 1]}", [
-            ("compras", brl(I["compras"]), VERDE if I["compras"] else CINZA),
-            ("vendas", brl(I["vendas"]), VERMELHO if I["vendas"] else CINZA),
+            ("compras", brl(-I["compras"], True), VERMELHO if I["compras"] else CINZA),
+            ("vendas", brl(I["vendas"]), VERDE if I["vendas"] else CINZA),
             ("média dos últimos 6 meses", brl(I["media6"], True), "#111")],
-            ("saldo", brl(I["compras"] - I["vendas"], True), "#111")))
+            ("saldo", brl(I["vendas"] - I["compras"], True), "#111")))
     dest = [(f"{str(n)[:40]} · {d:%d/%m}", brl(v), "#111") for n, d, v in D["top"][:3]]
-    dest += [(f"{c['nome']} acima do orçamento", f"+ {brl(c['gasto'] - c['orc'])}", VERMELHO) for c in D["estouros"]]
+    dest += [(f"{c['nome']} acima do orçamento", f"+{brl(c['gasto'] - c['orc'])}", VERMELHO) for c in D["estouros"]]
     if dest:
         h.append(bloco("destaques", dest))
     if D["parc_mes"]:
