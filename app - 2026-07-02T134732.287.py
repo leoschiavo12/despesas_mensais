@@ -221,6 +221,8 @@ table.pf-tab td { padding: 0.55rem 0.3rem !important; border: none !important;
 table.pf-tab td:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.pf-tab td.pos { color: #22c55e; }
 table.pf-tab td.neg { color: #ef4444; }
+table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250,0.7);
+    font-weight: 600; font-size: 0.9rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -812,26 +814,29 @@ def fluxo_pf(ref, df_notas):
     }
 
 
-def render_resumo(rotulo, total, itens, cor_total=None):
-    """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): total em cima, lista embaixo.
-    itens: [(rótulo, valor, classe)] · classe 'pos' (verde), 'neg' (vermelho) ou '' (cor padrão)"""
-    brl = lambda v: ("R$ " + f"{abs(v):.0f}").replace("$", "&#36;")
-    linhas = "".join(f"<tr><td>{r}</td><td class='{c}'>{'−' if v < 0 else ''}{brl(v)}</td></tr>"
-                     for r, v, c in itens) \
-        or "<tr><td style='color:#888;'>nada neste mês</td></tr>"
+MESES_EXT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
+             "setembro", "outubro", "novembro", "dezembro"]
+
+
+def render_resumo(titulo, itens, rotulo_total, total):
+    """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): título pequeno, lista
+    e o total discreto na última linha. itens: [(rótulo, valor, classe)] · classe 'pos' (verde),
+    'neg' (vermelho) ou '' (cor padrão)"""
+    brl = lambda v: ("−" if v < -0.004 else "") + ("R$ " + f"{abs(v):.0f}").replace("$", "&#36;")
+    linhas = "".join(f"<tr><td>{r}</td><td class='{c}'>{brl(v)}</td></tr>" for r, v, c in itens) \
+        or "<tr><td style='color:#888;'>nada neste mês</td><td></td></tr>"
+    linhas += f"<tr class='tot'><td>{rotulo_total}</td><td>{brl(total)}</td></tr>"
     st.markdown(
-        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 0.6rem;'>"
-        f"<p style='font-size:0.85rem;color:rgba(250,250,250,0.55);margin:0 0 2px 0;'>{rotulo}</p>"
-        f"<p style='font-size:1.6rem;font-weight:600;line-height:1.2;margin:0 0 0.9rem 0;"
-        f"color:{cor_total or 'inherit'};'>{'−' if total < 0 else ''}{brl(total)}</p>"
+        "<div style='border:1px solid #202024;border-radius:12px;padding:0.9rem 1.1rem 0.5rem;'>"
+        f"<p style='font-size:0.85rem;color:rgba(250,250,250,0.55);margin:0 0 0.3rem 0;'>{titulo}</p>"
         f"<table class='pf-tab'>{linhas}</table></div>", unsafe_allow_html=True)
 
 
-def render_lista_pf(rotulo, lista, cor):
+def render_lista_pf(titulo, lista, cor):
     """lista da PF do maior para o menor, sem os zerados; valor negativo fica com a cor oposta"""
     oposta = {"pos": "neg", "neg": "pos"}[cor]
     itens = sorted([(r, v, cor if v >= 0 else oposta) for r, v in lista if abs(v) >= 0.005], key=lambda x: -x[1])
-    render_resumo(rotulo, sum(v for _, v, _ in itens), itens)
+    render_resumo(titulo, itens, "total", sum(v for _, v, _ in itens))
 
 
 def salvar_configuracoes(limite, df_categorias):
@@ -1408,7 +1413,7 @@ with aba_lancar:
     st.write("")
     # resumo: o que saiu da conta PF no mês (fatura do mês anterior, FIES e outras despesas PIX)
     try:
-        render_lista_pf("pago pela PF", fluxo_pf(ref, carregar_notas())["saidas"], "neg")
+        render_lista_pf(f"saiu da conta em {MESES_EXT[ref.month - 1]}", fluxo_pf(ref, carregar_notas())["saidas"], "neg")
     except Exception as e:
         st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
     st.write("")
@@ -1497,7 +1502,7 @@ with aba_receitas:
     else:
         try:
             _fx = fluxo_pf(ref_rec, df_notas)
-            render_lista_pf("recebido na PF", _fx["entradas"], "pos")
+            render_lista_pf(f"entrou na conta em {MESES_EXT[ref_rec.month - 1]}", _fx["entradas"], "pos")
             if not _fx["tem_div"] and ref_rec == hoje_br().replace(day=1):
                 st.caption("dividendos do mês entram no resumo quando o mês fecha.")
         except Exception as e:
@@ -1556,9 +1561,10 @@ with aba_invest:
         _d = filtrar_mes(df_inv, _m.year, _m.month)
         _liq.append(_tot(_d, "compra") - _tot(_d, "venda"))
     _compras, _vendas = _tot(df_inv_mes, "compra"), _tot(df_inv_mes, "venda")
-    render_resumo("saldo do mês", _compras - _vendas,
+    render_resumo(f"investimentos em {MESES_EXT[ref_inv.month - 1]}",
                   [("compras", _compras, "pos" if _compras else ""), ("vendas", -_vendas, "neg" if _vendas else ""),
-                   ("média dos últimos 6 meses", sum(_liq) / 6, "")])
+                   ("média dos últimos 6 meses", sum(_liq) / 6, "")],
+                  "saldo", _compras - _vendas)
     if erro_inv:
         st.warning(erro_inv)
     st.write("")
