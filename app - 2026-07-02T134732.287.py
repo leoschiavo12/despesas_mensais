@@ -300,45 +300,135 @@ def get_client():
         scopes=["https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive"],
     )
-    return gspread.authorize(creds)
+    # BackOffHTTPClient: se o Google responder 429 (cota de leitura), espera e tenta de novo
+    return gspread.authorize(creds, http_client=gspread.BackOffHTTPClient)
+
+
+# ── leitura econômica: o Google Sheets limita a ~60 leituras por minuto (somando este app e o
+# SmartWallet, que usam a mesma conta de serviço). por isso: a planilha e a lista de abas são
+# abertas uma vez por processo, e cada planilha é lida inteira numa única chamada (batch),
+# guardada em cache por 5 min e invalidada a cada gravação.
+
+@st.cache_resource(show_spinner=False)
+def _sh(sid):
+    return get_client().open_by_key(sid)
+
+
+@st.cache_resource(show_spinner=False)
+def _abas(sid):
+    return {w.title: w for w in _sh(sid).worksheets()}
+
+
+@st.cache_resource(show_spinner=False)
+def _versoes():
+    return {}
+
+
+def _ws(sid, nome):
+    abas = _abas(sid)
+    if nome not in abas:          # aba criada por fora (ou pelo SmartWallet): relê a lista uma vez
+        _abas.clear()
+        abas = _abas(sid)
+    return abas.get(nome)
 
 
 def get_spreadsheet():
-    return get_client().open_by_key(SPREADSHEET_ID)
+    return _sh(SPREADSHEET_ID)
 
 
-def garantir_abas(sh):
-    """Cria as abas necessárias com cabeçalho/dados padrão se ainda não existirem."""
-    titulos_existentes = [ws.title for ws in sh.worksheets()]
+def ws_desp(nome):
+    return _ws(SPREADSHEET_ID, nome)
+
+
+def ws_cart(nome):
+    return _ws(CARTEIRA_SPREADSHEET_ID, nome)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ler_lote(sid, abas, versao):
+    """todas as abas pedidas numa chamada só: {aba: linhas (lista de listas)}"""
+    if not abas:
+        return {}
+    res = _sh(sid).values_batch_get([f"'{a}'!A:Z" for a in abas],
+                                    params={"valueRenderOption": "UNFORMATTED_VALUE",
+                                            "dateTimeRenderOption": "FORMATTED_STRING"})
+    return {a: r.get("values", []) for a, r in zip(abas, res.get("valueRanges", []))}
+
+
+ABAS_CARTEIRA_LIDAS = ("pj_notas", "pj_parametros", "pj_parametros_hist", "pf_cartao", "dividendos_mensais",
+                       "lancamentos", "ativos_info")
+
+
+def dados_desp():
+    abas = tuple(a for a in _abas(SPREADSHEET_ID)
+                 if a in (ABA_LANCAMENTOS, ABA_CATEGORIAS, ABA_CONFIG, ABA_PIX) or a.startswith("arquivo_"))
+    return _ler_lote(SPREADSHEET_ID, abas, _versoes().get("d", 0))
+
+
+def dados_cart():
+    abas = tuple(a for a in _abas(CARTEIRA_SPREADSHEET_ID) if a in ABAS_CARTEIRA_LIDAS)
+    return _ler_lote(CARTEIRA_SPREADSHEET_ID, abas, _versoes().get("c", 0))
+
+
+def registros(linhas):
+    """linhas da planilha (cabeçalho + dados) → lista de dicts, como o get_all_records"""
+    if not linhas:
+        return []
+    cab = [str(c).strip() for c in linhas[0]]
+    return [dict(zip(cab, list(r) + [""] * (len(cab) - len(r)))) for r in linhas[1:] if any(str(x).strip() for x in r)]
+
+
+def _inval_d():
+    """depois de gravar na planilha do app: a próxima leitura busca os dados novos"""
+    _versoes()["d"] = _versoes().get("d", 0) + 1
+    for k in ("df_lancamentos", "df_pix", "cartao_arquivo"):
+        st.session_state.pop(k, None)
+
+
+def _inval_c():
+    """depois de gravar na planilha da carteira"""
+    _versoes()["c"] = _versoes().get("c", 0) + 1
+    for k in ("df_notas", "df_invest", "ativos_invest", "base_pf"):
+        st.session_state.pop(k, None)
+
+
+@st.cache_resource(show_spinner=False)
+def garantir_abas():
+    """cria as abas necessárias (com cabeçalho/dados padrão) se ainda não existirem — uma vez por processo"""
+    sh = get_spreadsheet()
+    titulos_existentes = list(_abas(SPREADSHEET_ID))
+    criou = False
 
     if ABA_LANCAMENTOS not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_LANCAMENTOS, rows=1000, cols=4)
         ws.append_row(["data", "categoria", "descricao", "valor"])
+        criou = True
 
     if ABA_CATEGORIAS not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_CATEGORIAS, rows=50, cols=5)
-        ws.append_row(["id", "nome", "cor", "valor_alvo", "fixo"])
-        for c in CATEGORIAS_PADRAO:
-            ws.append_row([c["id"], c["nome"], c["cor"], c["valor_alvo"], str(c["fixo"])])
+        ws.append_rows([["id", "nome", "cor", "valor_alvo", "fixo"]] +
+                       [[c["id"], c["nome"], c["cor"], c["valor_alvo"], str(c["fixo"])] for c in CATEGORIAS_PADRAO])
+        criou = True
 
     if ABA_PIX not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_PIX, rows=1000, cols=5)
         ws.append_row(["data", "tipo", "categoria", "descricao", "valor"])
+        criou = True
 
     if ABA_CONFIG not in titulos_existentes:
         ws = sh.add_worksheet(title=ABA_CONFIG, rows=10, cols=2)
-        ws.append_row(["chave", "valor"])
-        ws.append_row(["limite_mensal", LIMITE_PADRAO])
+        ws.append_rows([["chave", "valor"], ["limite_mensal", LIMITE_PADRAO]])
+        criou = True
+    if criou:
+        _abas.clear()
+    return True
 
 
 # ───────────────────────── LEITURA / ESCRITA ─────────────────────────
 
-@st.cache_data(ttl=3600)
 def carregar_categorias():
-    sh = get_spreadsheet()
-    garantir_abas(sh)
-    ws = sh.worksheet(ABA_CATEGORIAS)
-    df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
+    garantir_abas()
+    df = pd.DataFrame(registros(dados_desp().get(ABA_CATEGORIAS, [])))
     if df.empty or "valor_alvo" not in df.columns:
         # Planilha ainda no esquema antigo (percentual) ou vazia — usa os padrões limpos.
         # Abra a aba Orçamento e clique em "Salvar orçamento" uma vez para gravar
@@ -350,12 +440,9 @@ def carregar_categorias():
 
 
 
-@st.cache_data(ttl=3600)
 def carregar_config():
-    sh = get_spreadsheet()
-    garantir_abas(sh)
-    ws = sh.worksheet(ABA_CONFIG)
-    df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
+    garantir_abas()
+    df = pd.DataFrame(registros(dados_desp().get(ABA_CONFIG, [])))
     limite = LIMITE_PADRAO
     if not df.empty:
         linha = df[df["chave"] == "limite_mensal"]
@@ -367,10 +454,8 @@ def carregar_config():
 def carregar_lancamentos():
     """Sem cache de longo prazo — recarrega a cada save/delete via session_state."""
     if "df_lancamentos" not in st.session_state:
-        sh = get_spreadsheet()
-        garantir_abas(sh)
-        ws = sh.worksheet(ABA_LANCAMENTOS)
-        df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
+        garantir_abas()
+        df = pd.DataFrame(registros(dados_desp().get(ABA_LANCAMENTOS, [])))
         if not df.empty:
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
             df["data"] = pd.to_datetime(df["data"]).dt.date
@@ -382,18 +467,18 @@ def carregar_lancamentos():
 
 
 def recarregar_lancamentos():
-    st.session_state.pop("df_lancamentos", None)
+    _inval_d()
 
 
 def salvar_lancamento(data_str, categoria, descricao, valor):
-    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    ws = ws_desp(ABA_LANCAMENTOS)
     ws.append_row([data_str, categoria, descricao, valor])
     recarregar_lancamentos()
 
 
 def excluir_lancamento(data_str, categoria, descricao, valor):
     """Exclusão por conteúdo, não por índice — evita quebra de posição em uso concorrente."""
-    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    ws = ws_desp(ABA_LANCAMENTOS)
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(registros, start=2):  # linha 1 = cabeçalho
         if (str(r["data"]) == str(data_str) and r["categoria"] == categoria
@@ -426,7 +511,7 @@ def _garantir_coluna_parcelamento(ws):
 
 def salvar_parcelado(data_compra, categoria, descricao, total, n):
     """divide o total em n parcelas mensais (a última leva os centavos da divisão)"""
-    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    ws = ws_desp(ABA_LANCAMENTOS)
     _garantir_coluna_parcelamento(ws)
     gid = agora_br().strftime("%y%m%d%H%M%S")
     parcela = int(round(total * 100)) // n / 100
@@ -466,7 +551,7 @@ def adiantar_parcelas(grupo, k, desconto):
     faixa = (f"{nums[0].group(2)}–{nums[-1].group(2)}/{grupo['n']}" if all(nums) and k > 1
              else (f"{nums[0].group(2)}/{grupo['n']}" if nums[0] else f"{k}x"))
     desc = f"{grupo['nome']} (adiant. {faixa}" + (f", desc. {fmt_brl2(desconto)})" if desconto > 0 else ")")
-    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    ws = ws_desp(ABA_LANCAMENTOS)
     # primeiro grava o adiantamento; depois apaga as parcelas, de baixo para cima
     ws.append_row([hoje_br().isoformat(), grupo["categoria"], desc, round(soma - desconto, 2), grupo["gid"]])
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
@@ -482,14 +567,12 @@ def adiantar_parcelas(grupo, k, desconto):
 # ── investimentos (planilha da carteira) ──
 
 def _ws_carteira(nome, cabecalho=None):
-    sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
-    if nome not in [w.title for w in sh.worksheets()]:
-        if cabecalho is None:
-            return None
-        ws = sh.add_worksheet(title=nome, rows=200, cols=len(cabecalho))
+    ws = ws_cart(nome)
+    if ws is None and cabecalho is not None:
+        ws = _sh(CARTEIRA_SPREADSHEET_ID).add_worksheet(title=nome, rows=200, cols=len(cabecalho))
         ws.append_row(cabecalho)
-        return ws
-    return sh.worksheet(nome)
+        _abas.clear()
+    return ws
 
 
 def _num_br(x):
@@ -517,10 +600,12 @@ def _data_carteira(x):
     return None if pd.isna(d) else d.date()
 
 
-def _ler_invest_bruto(ws):
-    """linhas da aba lancamentos da carteira: [(nº da linha, data, tipo, ativo, classe, qtd, preço, total)]"""
-    vals = ws.get("A:G", value_render_option=ValueRenderOption.unformatted,
-                  date_time_render_option=DateTimeOption.formatted_string)
+def _ler_invest_bruto(ws=None, vals=None):
+    """linhas da aba lancamentos da carteira: [(nº da linha, data, tipo, ativo, classe, qtd, preço, total)].
+    vals (já lidos no lote) para exibir; ws (leitura na hora) para achar a linha certa ao gravar"""
+    if vals is None:
+        vals = ws.get("A:G", value_render_option=ValueRenderOption.unformatted,
+                      date_time_render_option=DateTimeOption.formatted_string)
     out = []
     for i, r in enumerate(vals[1:], start=2):
         r = (list(r) + [""] * 7)[:7]
@@ -534,8 +619,10 @@ def _ler_invest_bruto(ws):
 
 def carregar_investimentos():
     if "df_invest" not in st.session_state:
-        ws = _ws_carteira(ABA_INVEST, INVEST_HEADERS)
-        df = pd.DataFrame(_ler_invest_bruto(ws),
+        dc = dados_cart()
+        if ABA_INVEST not in dc:
+            _ws_carteira(ABA_INVEST, INVEST_HEADERS)
+        df = pd.DataFrame(_ler_invest_bruto(vals=dc.get(ABA_INVEST, [])),
                           columns=["linha", "data", "tipo", "ativo", "classe", "quantidade", "preco", "total"])
         st.session_state["df_invest"] = df
     return st.session_state["df_invest"]
@@ -547,12 +634,10 @@ def carregar_ativos():
     inteiro sai da lista (volta por "+ novo ativo")"""
     if "ativos_invest" not in st.session_state:
         info = {}
-        ws = _ws_carteira(ABA_ATIVOS)
-        if ws is not None:
-            for r in ws.get_all_values()[1:]:
-                # linhas com ticker_atual são nomes antigos (de-para) e não entram na lista
-                if r and r[0].strip() and len(r) > 1 and r[1].strip() and not (len(r) > 5 and r[5].strip()):
-                    info.setdefault(r[0].strip().upper(), r[1].strip())
+        for r in [[str(x) for x in l] for l in dados_cart().get(ABA_ATIVOS, [])[1:]]:
+            # linhas com ticker_atual são nomes antigos (de-para) e não entram na lista
+            if r and r[0].strip() and len(r) > 1 and r[1].strip() and not (len(r) > 5 and r[5].strip()):
+                info.setdefault(r[0].strip().upper(), r[1].strip())
         df = carregar_investimentos()
         classes, posicao = {}, {}
         for _, r in df.iterrows():
@@ -575,8 +660,7 @@ def carregar_ativos():
 
 
 def _limpar_invest():
-    st.session_state.pop("df_invest", None)
-    st.session_state.pop("ativos_invest", None)
+    _inval_c()
 
 
 def _txt_num(v, casas):
@@ -620,7 +704,7 @@ def salvar_ativo_novo(ativo, classe, tipo, indexador, pais):
 
 def atualizar_lancamento(orig, novo):
     """orig/novo: (data aaaa-mm-dd, categoria, descrição, valor) — a coluna parcelamento fica como está"""
-    ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
+    ws = ws_desp(ABA_LANCAMENTOS)
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(registros, start=2):
         if (str(r["data"]) == str(orig[0]) and r["categoria"] == orig[1]
@@ -632,7 +716,7 @@ def atualizar_lancamento(orig, novo):
 
 def atualizar_pix(orig, novo):
     """orig/novo: (data aaaa-mm-dd, tipo, categoria, descrição, valor)"""
-    ws = get_spreadsheet().worksheet(ABA_PIX)
+    ws = ws_desp(ABA_PIX)
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(registros, start=2):
         if (str(r["data"]) == str(orig[0]) and str(r["tipo"]).strip().lower() == orig[1]
@@ -640,11 +724,11 @@ def atualizar_pix(orig, novo):
                 and float(r["valor"]) == float(orig[4])):
             ws.update(range_name=f"A{i}:E{i}", values=[list(novo)])
             break
-    st.session_state.pop("df_pix", None)
+    _inval_d()
 
 
 def atualizar_nota(tipo, data_txt, valor, descricao, nova_data, novo_valor, nova_descricao):
-    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    ws = ws_cart(ABA_NOTAS)
     regs = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(regs, start=2):
         if (str(r["tipo"]).strip().lower() == tipo and str(r["data"]) == str(data_txt)
@@ -654,7 +738,7 @@ def atualizar_nota(tipo, data_txt, valor, descricao, nova_data, novo_valor, nova
                 tipo, nova_data.strftime("%d/%m/%Y"), float(novo_valor),
                 "mês seguinte" if tipo == "nota fiscal" else "", nova_descricao]])
             break
-    st.session_state.pop("df_notas", None)
+    _inval_c()
 
 
 def atualizar_investimento(orig, data_lanc, tipo, ativo, classe, qtd, preco, total):
@@ -674,10 +758,8 @@ def atualizar_investimento(orig, data_lanc, tipo, ativo, classe, qtd, preco, tot
 def carregar_pix():
     """lançamentos de PIX (aba pix) — totalmente separados da fatura do cartão"""
     if "df_pix" not in st.session_state:
-        sh = get_spreadsheet()
-        garantir_abas(sh)
-        ws = sh.worksheet(ABA_PIX)
-        df = pd.DataFrame(ws.get_all_records(value_render_option=ValueRenderOption.unformatted))
+        garantir_abas()
+        df = pd.DataFrame(registros(dados_desp().get(ABA_PIX, [])))
         if df.empty:
             df = pd.DataFrame(columns=["data", "tipo", "categoria", "descricao", "valor"])
         else:
@@ -689,14 +771,14 @@ def carregar_pix():
 
 
 def salvar_pix(data_str, tipo, categoria, descricao, valor):
-    ws = get_spreadsheet().worksheet(ABA_PIX)
+    ws = ws_desp(ABA_PIX)
     ws.append_row([data_str, tipo, categoria, descricao, valor])
-    st.session_state.pop("df_pix", None)
+    _inval_d()
 
 
 def excluir_pix(data_str, tipo, categoria, descricao, valor):
     """exclusão por conteúdo, como nos lançamentos do cartão"""
-    ws = get_spreadsheet().worksheet(ABA_PIX)
+    ws = ws_desp(ABA_PIX)
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(registros, start=2):
         if (str(r["data"]) == str(data_str) and str(r["tipo"]).strip().lower() == tipo
@@ -704,17 +786,16 @@ def excluir_pix(data_str, tipo, categoria, descricao, valor):
                 and float(r["valor"]) == float(valor)):
             ws.delete_rows(i)
             break
-    st.session_state.pop("df_pix", None)
+    _inval_d()
 
 
 def carregar_notas():
     """notas fiscais e reembolsos (aba pj_notas da carteira) · None se a aba não existe"""
     if "df_notas" not in st.session_state:
-        sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
-        if ABA_NOTAS not in [ws.title for ws in sh.worksheets()]:
+        dc = dados_cart()
+        if ABA_NOTAS not in dc:
             return None
-        regs = sh.worksheet(ABA_NOTAS).get_all_records(value_render_option=ValueRenderOption.unformatted)
-        df = pd.DataFrame(regs)
+        df = pd.DataFrame(registros(dc[ABA_NOTAS]))
         if df.empty:
             df = pd.DataFrame(columns=["tipo", "data", "valor", "recebimento", "descricao"])
         else:
@@ -730,14 +811,14 @@ def carregar_notas():
 
 def salvar_nota(tipo, data_lanc, valor, descricao):
     """mesmo formato do SmartWallet: tipo, data dd/mm/aaaa, valor, recebimento, descrição"""
-    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    ws = ws_cart(ABA_NOTAS)
     ws.append_row([tipo, data_lanc.strftime("%d/%m/%Y"), float(valor),
                    "mês seguinte" if tipo == "nota fiscal" else "", descricao])
-    st.session_state.pop("df_notas", None)
+    _inval_c()
 
 
 def excluir_nota(tipo, data_txt, valor, descricao):
-    ws = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID).worksheet(ABA_NOTAS)
+    ws = ws_cart(ABA_NOTAS)
     regs = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     for i, r in enumerate(regs, start=2):
         if (str(r["tipo"]).strip().lower() == tipo and str(r["data"]) == str(data_txt)
@@ -745,7 +826,7 @@ def excluir_nota(tipo, data_txt, valor, descricao):
                 and str(r.get("descricao", "")) == str(descricao)):
             ws.delete_rows(i)
             break
-    st.session_state.pop("df_notas", None)
+    _inval_c()
 
 
 # ── fluxo da PF (resumos das abas receitas e despesas) ──
@@ -775,13 +856,10 @@ def _ano_mes(s):
 def carregar_base_pf():
     """parâmetros PJ (atuais + histórico), faturas informadas no SmartWallet e dividendos por mês"""
     if "base_pf" not in st.session_state:
-        sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
-        abas = {w.title: w for w in sh.worksheets()}
+        dc = dados_cart()
 
         def linhas(nome, rng):
-            if nome not in abas:
-                return []
-            return abas[nome].get(rng, value_render_option=ValueRenderOption.unformatted)[1:]
+            return dc.get(nome, [])[1:]
 
         par = dict(PJ_PAR_PADRAO)
         for r in linhas("pj_parametros", "A:B"):
@@ -820,9 +898,9 @@ def cartao_do_mes(ref):
     """gastos no cartão de um mês (lancamentos + abas arquivo_AAAA deste app)"""
     if "cartao_arquivo" not in st.session_state:
         tot = {}
-        for ws in get_spreadsheet().worksheets():
-            if ws.title.startswith("arquivo_"):
-                for r in ws.get_all_records(value_render_option=ValueRenderOption.unformatted):
+        for aba, linhas in dados_desp().items():
+            if aba.startswith("arquivo_"):
+                for r in registros(linhas):
                     d, v = pd.to_datetime(str(r.get("data", "")), errors="coerce"), _num_br(r.get("valor", ""))
                     if not pd.isna(d) and v is not None:
                         tot[d.strftime("%Y-%m")] = tot.get(d.strftime("%Y-%m"), 0.0) + v
@@ -904,20 +982,18 @@ def render_lista_pf(titulo, lista, cor):
 
 
 def salvar_configuracoes(limite, df_categorias):
-    sh = get_spreadsheet()
-
-    ws_cfg = sh.worksheet(ABA_CONFIG)
+    ws_cfg = ws_desp(ABA_CONFIG)
     ws_cfg.clear()
     ws_cfg.update([["chave", "valor"], ["limite_mensal", limite]])
 
-    ws_cat = sh.worksheet(ABA_CATEGORIAS)
+    ws_cat = ws_desp(ABA_CATEGORIAS)
     ws_cat.clear()
     linhas = [["id", "nome", "cor", "valor_alvo", "fixo"]]
     for _, r in df_categorias.iterrows():
         linhas.append([r["id"], r["nome"], r["cor"], r["valor_alvo"], str(r["fixo"])])
     ws_cat.update(linhas)
 
-    st.cache_data.clear()
+    _inval_d()
 
 
 # ───────────────────────── FORMATAÇÃO ─────────────────────────
@@ -1837,8 +1913,7 @@ def dialogo_nova_categoria(limite_salvo):
 
 def mover_categoria(de, para):
     """troca a categoria 'de' por 'para' em todos os lançamentos (cartão, arquivo_AAAA e pix)"""
-    sh = get_spreadsheet()
-    for ws in sh.worksheets():
+    for ws in list(_abas(SPREADSHEET_ID).values()):
         if ws.title in (ABA_LANCAMENTOS, ABA_PIX) or ws.title.startswith("arquivo_"):
             vals = ws.get_all_values()
             if not vals or "categoria" not in vals[0]:
@@ -1849,9 +1924,8 @@ def mover_categoria(de, para):
             if cel:
                 ws.update_cells(cel)
     recarregar_lancamentos()
-    st.session_state.pop("df_pix", None)
-    st.session_state.pop("cartao_arquivo", None)
-
+    _inval_d()
+    
 
 @st.dialog("editar categoria")
 def dialogo_categoria(cid):
