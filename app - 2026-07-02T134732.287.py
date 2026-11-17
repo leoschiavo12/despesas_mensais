@@ -23,6 +23,18 @@ import calendar
 import re
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+# o Streamlit Cloud roda em UTC: toda data/hora do app usa o horário de Brasília
+FUSO = ZoneInfo("America/Sao_Paulo")
+
+
+def agora_br():
+    return datetime.now(FUSO)
+
+
+def hoje_br():
+    return agora_br().date()
 
 # ───────────────────────── CONFIG ─────────────────────────
 
@@ -346,7 +358,7 @@ def salvar_parcelado(data_compra, categoria, descricao, total, n):
     """divide o total em n parcelas mensais (a última leva os centavos da divisão)"""
     ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
     _garantir_coluna_parcelamento(ws)
-    gid = datetime.now().strftime("%y%m%d%H%M%S")
+    gid = agora_br().strftime("%y%m%d%H%M%S")
     parcela = int(round(total * 100)) // n / 100
     linhas = []
     for i in range(n):
@@ -361,7 +373,7 @@ def parcelamentos_abertos(df):
     """compras com parcelas em meses futuros: [{gid, nome, categoria, n, futuras: [(data, descricao, valor)]}]"""
     if df.empty or COL_PARCELAMENTO not in df.columns:
         return []
-    hoje = date.today()
+    hoje = hoje_br()
     fut = df[(df[COL_PARCELAMENTO] != "") &
              df["data"].apply(lambda d: (d.year, d.month) > (hoje.year, hoje.month))]
     grupos = []
@@ -386,7 +398,7 @@ def adiantar_parcelas(grupo, k, desconto):
     desc = f"{grupo['nome']} (adiant. {faixa}" + (f", desc. {fmt_brl2(desconto)})" if desconto > 0 else ")")
     ws = get_spreadsheet().worksheet(ABA_LANCAMENTOS)
     # primeiro grava o adiantamento; depois apaga as parcelas, de baixo para cima
-    ws.append_row([date.today().isoformat(), grupo["categoria"], desc, round(soma - desconto, 2), grupo["gid"]])
+    ws.append_row([hoje_br().isoformat(), grupo["categoria"], desc, round(soma - desconto, 2), grupo["gid"]])
     registros = ws.get_all_records(value_render_option=ValueRenderOption.unformatted)
     chaves = {(d.isoformat(), ds) for d, ds, _ in alvo}
     linhas = [i for i, r in enumerate(registros, start=2)
@@ -665,6 +677,160 @@ def excluir_nota(tipo, data_txt, valor, descricao):
     st.session_state.pop("df_notas", None)
 
 
+# ── fluxo da PF (resumo da aba receitas) ──
+# mesma conta do fluxo do SmartWallet: no mês k entram na PF o pró-labore líquido e os lucros
+# das notas emitidas em k−1, os reembolsos, as entradas PIX e os dividendos; saem o FIES, a
+# fatura do cartão de k−1, as saídas PIX e o total investido no mês. parâmetros lidos das abas
+# pj_parametros / pj_parametros_hist / pf_cartao / dividendos_mensais da planilha da carteira.
+
+PJ_PAR_PADRAO = {"faturamento_minimo": 0.0, "prev_pct": 0.0, "pro_labore": 0.0, "inss_pct": 11.0,
+                 "das_pct": 6.0, "contador": 0.0, "fies": 0.0, "reembolso_base": 0.0,
+                 "taxa_prefeitura": 0.0, "cartao_estimado": 0.0,
+                 "fies_fim": "", "cartao_real_desde": ""}
+PJ_PAR_TEXTO = {"fies_fim", "cartao_real_desde"}
+
+
+def _ano_mes(s):
+    """'12/2032' · '01/12/2032' · '2032-12-01' · '2032-12' → '2032-12' (ou None)"""
+    s = str(s or "").strip()
+    for fmt in ("%m/%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y-%m"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m")
+        except ValueError:
+            pass
+    return None
+
+
+def carregar_base_pf():
+    """parâmetros PJ (atuais + histórico), faturas informadas à mão e dividendos por mês"""
+    if "base_pf" not in st.session_state:
+        sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
+        abas = {w.title: w for w in sh.worksheets()}
+
+        def linhas(nome, rng):
+            if nome not in abas:
+                return []
+            return abas[nome].get(rng, value_render_option=ValueRenderOption.unformatted)[1:]
+
+        par = dict(PJ_PAR_PADRAO)
+        for r in linhas("pj_parametros", "A:B"):
+            if len(r) >= 2 and str(r[0]).strip() in par:
+                k = str(r[0]).strip()
+                v = str(r[1]).strip() if k in PJ_PAR_TEXTO else _num_br(r[1])
+                if v is not None:
+                    par[k] = v
+        hist = []
+        for r in linhas("pj_parametros_hist", "A:C"):
+            if len(r) >= 3 and str(r[0]).strip():
+                d = str(r[1]).strip()
+                d = "0000-00" if d in ("", "0000-00", "início", "inicio") else _ano_mes(d)
+                v = _num_br(r[2])
+                if d and v is not None:
+                    hist.append({"chave": str(r[0]).strip(), "desde": d, "valor": v})
+        hist.sort(key=lambda e: (e["chave"], e["desde"]))
+        mensal = lambda nome: {str(r[0]).strip(): _num_br(r[1]) for r in linhas(nome, "A:B")
+                               if len(r) >= 2 and str(r[0]).strip() and _num_br(r[1]) is not None}
+        st.session_state["base_pf"] = {"par": par, "hist": hist, "cartao": mensal("pf_cartao"),
+                                       "divs": mensal("dividendos_mensais")}
+    return st.session_state["base_pf"]
+
+
+def par_vigente(par, hist, ano_mes):
+    """parâmetros valendo no mês: último valor do histórico com desde <= mês"""
+    out = dict(par)
+    for k in {e["chave"] for e in hist}:
+        regs = [e for e in hist if e["chave"] == k]
+        validos = [e for e in regs if e["desde"] <= ano_mes]
+        out[k] = (validos[-1] if validos else regs[0])["valor"]
+    return out
+
+
+def cartao_do_mes(ref):
+    """fatura de um mês (lancamentos + abas arquivo_AAAA deste app)"""
+    if "cartao_arquivo" not in st.session_state:
+        tot = {}
+        for ws in get_spreadsheet().worksheets():
+            if ws.title.startswith("arquivo_"):
+                for r in ws.get_all_records(value_render_option=ValueRenderOption.unformatted):
+                    d, v = pd.to_datetime(str(r.get("data", "")), errors="coerce"), _num_br(r.get("valor", ""))
+                    if not pd.isna(d) and v is not None:
+                        tot[d.strftime("%Y-%m")] = tot.get(d.strftime("%Y-%m"), 0.0) + v
+        st.session_state["cartao_arquivo"] = tot
+    df = filtrar_mes(carregar_lancamentos(), ref.year, ref.month)
+    return (float(df["valor"].sum()) if not df.empty else 0.0) \
+        + st.session_state["cartao_arquivo"].get(ref.strftime("%Y-%m"), 0.0)
+
+
+def fluxo_pf(ref, df_notas, df_inv):
+    """(entradas, saídas) da conta PF no mês ref: listas [(rótulo, valor)]"""
+    base = carregar_base_pf()
+    k, ant = ref.strftime("%Y-%m"), mes_anterior(ref)
+    a = ant.strftime("%Y-%m")
+    par = par_vigente(base["par"], base["hist"], k)
+    _n = lambda d, t: (float(d[d["tipo"] == t]["valor"].sum())
+                       if d is not None and not d.empty else 0.0)
+    _nm = lambda m: filtrar_mes(df_notas, m.year, m.month) if df_notas is not None and not df_notas.empty else None
+    fat = _n(_nm(ant), "nota fiscal")                  # notas de k−1, recebidas (e com DAS pago) em k
+    prev = par["faturamento_minimo"] * par["prev_pct"] / 100
+    das = fat * par["das_pct"] / 100
+    taxa = par["taxa_prefeitura"] if ref.month == 2 else 0.0
+    lucros = fat - prev - das - par["contador"] - taxa - par["pro_labore"]
+    fim = _ano_mes(par.get("fies_fim"))
+    fies = min(par["fies"], max(lucros, 0.0)) if (fim is None or k <= fim) else 0.0
+    pl_liq = par["pro_labore"] * (1 - par["inss_pct"] / 100)
+    reemb = par["reembolso_base"] + _n(_nm(ref), "reembolso")
+    # fatura paga em k = gastos de k−1 (valor informado no SmartWallet > média estimada > real)
+    desde = _ano_mes(par.get("cartao_real_desde")) or "0000-00"
+    if a in base["cartao"]:
+        cartao = base["cartao"][a]
+    elif a < desde:
+        cartao = par["cartao_estimado"]
+    else:
+        cartao = cartao_do_mes(ant)
+    pix = filtrar_mes(carregar_pix(), ref.year, ref.month)
+    _px = lambda t: float(pix[pix["tipo"].str.startswith(t[:4])]["valor"].sum()) if not pix.empty else 0.0
+    inv = filtrar_mes(df_inv, ref.year, ref.month) if df_inv is not None and not df_inv.empty else None
+    _iv = lambda t: float(inv[inv["tipo"] == t]["total"].sum()) if inv is not None and not inv.empty else 0.0
+    entradas = [("pró-labore líquido", pl_liq), ("lucros distribuídos", lucros), ("reembolsos", reemb),
+                ("pix", _px("entrada")), ("dividendos", base["divs"].get(k, 0.0))]
+    saidas = [("FIES", fies), (f"fatura de {mes_label(ant)}", cartao), ("pix", _px("saida")),
+              ("investido", _iv("compra") - _iv("venda"))]
+    return entradas, saidas, k in base["divs"]
+
+
+def render_resumo_pf(entradas, saidas):
+    """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): saldo em cima,
+    entradas e saídas da PF lado a lado"""
+    ent = sorted([x for x in entradas if abs(x[1]) >= 0.005], key=lambda x: -x[1])
+    sai = sorted([x for x in saidas if abs(x[1]) >= 0.005], key=lambda x: -x[1])
+    saldo = sum(v for _, v in ent) - sum(v for _, v in sai)
+    rot = "font-size:12px;color:rgba(250,250,250,0.55);margin:0 0 4px 0;"
+    td = "padding:0.28rem 0.2rem;border-bottom:1px solid rgba(250,250,250,0.06);"
+
+    def tabela(titulo, itens, entrada):
+        lin = ""
+        for r, v in itens:
+            # valor negativo inverte o sentido (ex.: lucro negativo, mês com mais vendas que compras)
+            positivo = (v >= 0) == entrada
+            cor, sinal = ("#22c55e", "+") if positivo else ("#ef4444", "−")
+            lin += (f"<tr><td style='{td}'>{r}</td><td style='{td}text-align:right;white-space:nowrap;"
+                    f"font-variant-numeric:tabular-nums;color:{cor};'>{sinal} {_html_brl(abs(v))}</td></tr>")
+        if not lin:
+            lin = f"<tr><td style='{td}color:#888;'>—</td></tr>"
+        return (f"<div><p style='{rot}'>{titulo}</p>"
+                "<table style='width:100%;border-collapse:collapse;font-size:0.88rem;border:none;'>"
+                f"{lin}</table></div>")
+
+    st.markdown(
+        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
+        f"<p style='{rot}'>saldo do mês (R&#36;)</p>"
+        f"<p style='font-size:1.6rem;font-weight:600;line-height:1.15;margin:0 0 14px 0;"
+        f"color:{'inherit' if saldo >= 0 else '#ef4444'};'>{'' if saldo >= 0 else '−'}{abs(saldo):.0f}</p>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;column-gap:16px;align-items:start;'>"
+        + tabela("entradas", ent, True) + tabela("saídas", sai, False)
+        + "</div></div>", unsafe_allow_html=True)
+
+
 def salvar_configuracoes(limite, df_categorias):
     sh = get_spreadsheet()
 
@@ -751,7 +917,7 @@ def orcamento_categoria(row, limite=None):
 # ───────────────────────── ESTADO DE NAVEGAÇÃO DE MÊS ─────────────────────────
 
 if "mes_ref" not in st.session_state:
-    hoje = date.today()
+    hoje = hoje_br()
     st.session_state["mes_ref"] = date(hoje.year, hoje.month, 1)
 
 
@@ -766,7 +932,7 @@ def mudar_mes(delta):
         novo_mes = 1
         novo_ano += 1
     candidato = date(novo_ano, novo_mes, 1)
-    hoje = date.today().replace(day=1)
+    hoje = hoje_br().replace(day=1)
     if candidato <= hoje:
         st.session_state["mes_ref"] = candidato
 
@@ -871,7 +1037,7 @@ def render_cards_limite(df_mes, limite_mensal, mes_ref=None):
     total_gasto = df_mes["valor"].sum() if not df_mes.empty else 0
     disponivel = limite_mensal - total_gasto
 
-    hoje = date.today()
+    hoje = hoje_br()
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     pct_mes = hoje.day / dias_no_mes
     if mes_ref is not None and (mes_ref.year, mes_ref.month) < (hoje.year, hoje.month):
@@ -1018,7 +1184,7 @@ def dialogo_despesa(item=None):
         index_default = opcoes_ids.index(item["categoria"]) if item["categoria"] in opcoes_ids else 0
     else:
         # padrão: a categoria com mais gasto no mês anterior
-        mes_ant = mes_anterior(date.today())
+        mes_ant = mes_anterior(hoje_br())
         df_mes_ant = filtrar_mes(carregar_lancamentos(), mes_ant.year, mes_ant.month)
         gasto_mes_ant = df_mes_ant.groupby("categoria")["valor"].sum().to_dict() if not df_mes_ant.empty else {}
         categoria_default = max(gasto_mes_ant, key=gasto_mes_ant.get) if gasto_mes_ant else None
@@ -1039,7 +1205,7 @@ def dialogo_despesa(item=None):
                                             format_func=lambda x: opcoes_labels[x])
         col_data, col_val = st.columns([1, 1])
         with col_data:
-            data_lanc = st.date_input("data", value=item["data"] if item else date.today(), format="DD/MM/YYYY")
+            data_lanc = st.date_input("data", value=item["data"] if item else hoje_br(), format="DD/MM/YYYY")
         with col_val:
             valor_txt = st.text_input("valor (R$)", value=_txt_valor(item["valor"]) if item else "",
                                       placeholder="0,00")
@@ -1118,7 +1284,7 @@ def dialogo_receita(item=None, erro_notas=None):
             tipo = st.selectbox("tipo", options=RECEITA_TIPOS, index=0)
         col_data, col_val = st.columns([1, 1])
         with col_data:
-            data_lanc = st.date_input("data", value=item["data"] if item else date.today(), format="DD/MM/YYYY")
+            data_lanc = st.date_input("data", value=item["data"] if item else hoje_br(), format="DD/MM/YYYY")
         with col_val:
             valor_txt = st.text_input("valor (R$)", value=_txt_valor(item["valor"]) if item else "",
                                       placeholder="0,00")
@@ -1170,8 +1336,8 @@ def dialogo_investimento(df_inv, ativos_inv, item=None):
                                         else (0 if nomes else None)))
         col_data, col_qtd = st.columns([1, 1])
         with col_data:
-            data_lanc = st.date_input("data", value=item["data"] if item else date.today(),
-                                      max_value=date.today(), format="DD/MM/YYYY")
+            data_lanc = st.date_input("data", value=item["data"] if item else hoje_br(),
+                                      max_value=hoje_br(), format="DD/MM/YYYY")
         with col_qtd:
             qtd_txt = st.text_input("quantidade", value=fmt_qtd(item["quantidade"]) if item else "",
                                     placeholder="ex.: 10")
@@ -1330,12 +1496,17 @@ with aba_receitas:
     df_pix_rec = filtrar_mes(carregar_pix(), ref_rec.year, ref_rec.month)
     df_pix_rec = df_pix_rec[df_pix_rec["tipo"] == "entrada"] if not df_pix_rec.empty else df_pix_rec
 
-    _soma = lambda d, t: float(d[d["tipo"] == t]["valor"].sum()) if not d.empty else 0.0
-    render_cards_3([("notas fiscais (R$)", _soma(df_notas_mes, "nota fiscal")),
-                    ("reembolsos (R$)", _soma(df_notas_mes, "reembolso")),
-                    ("pix (R$)", float(df_pix_rec["valor"].sum()) if not df_pix_rec.empty else 0.0)])
+    # resumo: só o que entrou e saiu da conta PF no mês (o histórico abaixo mostra as notas brutas)
     if erro_notas:
         st.warning(erro_notas)
+    else:
+        try:
+            _ent, _sai, _tem_div = fluxo_pf(ref_rec, df_notas, carregar_investimentos())
+            render_resumo_pf(_ent, _sai)
+            if not _tem_div and ref_rec == hoje_br().replace(day=1):
+                st.caption("dividendos do mês entram no resumo quando o mês fecha.")
+        except Exception as e:
+            st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
     st.write("")
     with st.container(key="novo_receita"):
         if st.button("+ nova receita", use_container_width=True):
@@ -1473,7 +1644,7 @@ with aba_orc:
                 elif limite_novo > 0 and (soma + novo_valor) > limite_novo:
                     st.error("soma ultrapassaria o limite.")
                 else:
-                    novo_id = "cat_" + str(int(datetime.now().timestamp()))
+                    novo_id = "cat_" + str(int(agora_br().timestamp()))
                     nova_linha = pd.DataFrame([{
                         "id": novo_id, "nome": novo_nome.strip().lower(), "cor": "#888780",
                         "valor_alvo": novo_valor,
