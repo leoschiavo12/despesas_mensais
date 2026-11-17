@@ -1673,14 +1673,24 @@ def dialogo_novo_ativo(ativos_inv):
 if st.session_state.get("_msg"):
     st.toast(st.session_state.pop("_msg"))
 
-aba_lancar, aba_receitas, aba_invest, aba_resumo, aba_orc = st.tabs(
-    ["despesas", "receitas", "investimentos", "resumo", "config"]
-)
+# só a aba aberta é calculada e enviada ao navegador (antes as cinco rodavam a cada clique)
+_NOMES_ABAS = ["despesas", "receitas", "investimentos", "resumo", "config"]
+try:
+    aba_lancar, aba_receitas, aba_invest, aba_resumo, aba_orc = st.tabs(
+        _NOMES_ABAS, key="abas_app", on_change="rerun")
+except TypeError:                           # Streamlit antigo: sem execução preguiçosa
+    aba_lancar, aba_receitas, aba_invest, aba_resumo, aba_orc = st.tabs(_NOMES_ABAS)
+
+
+def aberta(aba):
+    return getattr(aba, "open", True) is not False
+
 
 # ───────────────────────── ABA: DESPESAS ─────────────────────────
 # painel da fatura · botão do formulário · barras por categoria · parcelamentos · histórico
 
 with aba_lancar:
+  if aberta(aba_lancar):
     render_nav_mes("desp")
     ref = st.session_state["mes_ref"]
     df_mes = filtrar_mes(carregar_lancamentos(), ref.year, ref.month)
@@ -1730,6 +1740,7 @@ with aba_lancar:
 # ───────────────────────── ABA: RECEITAS ─────────────────────────
 
 with aba_receitas:
+  if aberta(aba_receitas):
     render_nav_mes("rec")
     ref_rec = st.session_state["mes_ref"]
     try:
@@ -1799,6 +1810,7 @@ with aba_receitas:
 # no mesmo formato de antes — o SmartWallet só lê.
 
 with aba_invest:
+  if aberta(aba_invest):
     render_nav_mes("inv")
     ref_inv = st.session_state["mes_ref"]
     try:
@@ -1863,6 +1875,7 @@ with aba_invest:
 # movimentação da conta PF no mês: entradas (receitas) e saídas (despesas + investido), e o saldo
 
 with aba_resumo:
+  if aberta(aba_resumo):
     render_nav_mes("res")
     ref_res = st.session_state["mes_ref"]
     try:
@@ -1962,6 +1975,7 @@ def dialogo_categoria(cid):
 
 
 with aba_orc:
+  if aberta(aba_orc):
     st.session_state.setdefault("orc_versao", 0)
     versao = st.session_state["orc_versao"]
     cats_edit = df_cat[df_cat["fixo"] == False]
