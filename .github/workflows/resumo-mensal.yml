@@ -1,9 +1,10 @@
-name: Resumo Mensal de Despesas
+name: Resumo Mensal
 
 on:
   schedule:
-    # 09:00 no horário de Brasília (12:00 UTC) do dia 1 de cada mês
-    - cron: "0 12 1 * *"
+    # 09:00 no horário de Brasília (12:00 UTC), de segunda a sexta, do dia 1 ao 10.
+    # o script só envia no 5º dia útil do mês (feriados nacionais descontados).
+    - cron: "0 12 1-10 * 1-5"
   workflow_dispatch: {}   # permite rodar manualmente pela aba "Actions" do GitHub, pra testar
 
 permissions:
@@ -22,12 +23,15 @@ jobs:
           python-version: "3.12"
 
       - name: Instalar dependências
-        run: pip install gspread google-auth pandas reportlab
+        run: pip install gspread google-auth pandas reportlab holidays
 
       - name: Gerar e enviar resumo mensal
+        id: resumo
         env:
+          FORCAR_ENVIO: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          CARTEIRA_SPREADSHEET_ID: ${{ secrets.CARTEIRA_SPREADSHEET_ID }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
@@ -36,6 +40,7 @@ jobs:
       # O GitHub desativa workflows agendados após 60 dias sem commits no repositório.
       # Um commit vazio por mês mantém o agendamento vivo.
       - name: Manter o repositório ativo
+        if: steps.resumo.outputs.enviado == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
