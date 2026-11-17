@@ -686,15 +686,17 @@ def excluir_nota(tipo, data_txt, valor, descricao):
     st.session_state.pop("df_notas", None)
 
 
-# ── entradas da PF (resumo da aba receitas) ──
+# ── fluxo da PF (resumos das abas receitas e despesas) ──
 # mesma conta do fluxo do SmartWallet: no mês k entram na PF o pró-labore líquido e os lucros
-# das notas emitidas em k−1, os reembolsos, as entradas PIX e os dividendos. parâmetros lidos
-# das abas pj_parametros / pj_parametros_hist / dividendos_mensais da planilha da carteira.
+# das notas emitidas em k−1, os reembolsos, as entradas PIX e os dividendos; saem a fatura do
+# cartão de k−1, o FIES e as saídas PIX. parâmetros lidos das abas pj_parametros /
+# pj_parametros_hist / pf_cartao / dividendos_mensais da planilha da carteira.
 
 PJ_PAR_PADRAO = {"faturamento_minimo": 0.0, "prev_pct": 0.0, "pro_labore": 0.0, "inss_pct": 11.0,
                  "das_pct": 6.0, "contador": 0.0, "fies": 0.0, "reembolso_base": 0.0,
-                 "taxa_prefeitura": 0.0}
-PJ_PAR_TEXTO = set()
+                 "taxa_prefeitura": 0.0, "cartao_estimado": 0.0,
+                 "fies_fim": "", "cartao_real_desde": ""}
+PJ_PAR_TEXTO = {"fies_fim", "cartao_real_desde"}
 
 
 def _ano_mes(s):
@@ -709,7 +711,7 @@ def _ano_mes(s):
 
 
 def carregar_base_pf():
-    """parâmetros PJ (atuais + histórico) e dividendos por mês"""
+    """parâmetros PJ (atuais + histórico), faturas informadas no SmartWallet e dividendos por mês"""
     if "base_pf" not in st.session_state:
         sh = get_client().open_by_key(CARTEIRA_SPREADSHEET_ID)
         abas = {w.title: w for w in sh.worksheets()}
@@ -737,7 +739,7 @@ def carregar_base_pf():
         hist.sort(key=lambda e: (e["chave"], e["desde"]))
         mensal = lambda nome: {str(r[0]).strip(): _num_br(r[1]) for r in linhas(nome, "A:B")
                                if len(r) >= 2 and str(r[0]).strip() and _num_br(r[1]) is not None}
-        st.session_state["base_pf"] = {"par": par, "hist": hist,
+        st.session_state["base_pf"] = {"par": par, "hist": hist, "cartao": mensal("pf_cartao"),
                                        "divs": mensal("dividendos_mensais")}
     return st.session_state["base_pf"]
 
@@ -752,44 +754,84 @@ def par_vigente(par, hist, ano_mes):
     return out
 
 
-def entradas_pf(ref, df_notas):
-    """o que entrou na conta PF no mês ref: [(rótulo, valor)] e se os dividendos do mês já estão gravados.
-    mesma conta do fluxo do SmartWallet: pró-labore líquido e lucros vêm das notas emitidas em k−1"""
+def cartao_do_mes(ref):
+    """gastos no cartão de um mês (lancamentos + abas arquivo_AAAA deste app)"""
+    if "cartao_arquivo" not in st.session_state:
+        tot = {}
+        for ws in get_spreadsheet().worksheets():
+            if ws.title.startswith("arquivo_"):
+                for r in ws.get_all_records(value_render_option=ValueRenderOption.unformatted):
+                    d, v = pd.to_datetime(str(r.get("data", "")), errors="coerce"), _num_br(r.get("valor", ""))
+                    if not pd.isna(d) and v is not None:
+                        tot[d.strftime("%Y-%m")] = tot.get(d.strftime("%Y-%m"), 0.0) + v
+        st.session_state["cartao_arquivo"] = tot
+    df = filtrar_mes(carregar_lancamentos(), ref.year, ref.month)
+    return (float(df["valor"].sum()) if not df.empty else 0.0) \
+        + st.session_state["cartao_arquivo"].get(ref.strftime("%Y-%m"), 0.0)
+
+
+def fluxo_pf(ref, df_notas):
+    """entradas e saídas da conta PF no mês ref: {'entradas': [(rótulo, valor)], 'saidas': [...],
+    'tem_div': dividendos do mês já gravados}"""
     base = carregar_base_pf()
     k, ant = ref.strftime("%Y-%m"), mes_anterior(ref)
+    a = ant.strftime("%Y-%m")
     par = par_vigente(base["par"], base["hist"], k)
+
     def _n(m, t):
         if df_notas is None or df_notas.empty:
             return 0.0
         d = filtrar_mes(df_notas, m.year, m.month)
         return float(d[d["tipo"] == t]["valor"].sum()) if not d.empty else 0.0
-    fat = _n(ant, "nota fiscal")
+
+    fat = _n(ant, "nota fiscal")                       # notas de k−1, recebidas (e com DAS pago) em k
     prev = par["faturamento_minimo"] * par["prev_pct"] / 100
     das = fat * par["das_pct"] / 100
     taxa = par["taxa_prefeitura"] if ref.month == 2 else 0.0
     lucros = fat - prev - das - par["contador"] - taxa - par["pro_labore"]
     pl_liq = par["pro_labore"] * (1 - par["inss_pct"] / 100)
+    fim = _ano_mes(par.get("fies_fim"))
+    fies = min(par["fies"], max(lucros, 0.0)) if (fim is None or k <= fim) else 0.0
+    # fatura paga em k = gastos de k−1 (valor informado no SmartWallet > média estimada > real)
+    desde = _ano_mes(par.get("cartao_real_desde")) or "0000-00"
+    if a in base["cartao"]:
+        cartao = base["cartao"][a]
+    elif a < desde:
+        cartao = par["cartao_estimado"]
+    else:
+        cartao = cartao_do_mes(ant)
     pix = filtrar_mes(carregar_pix(), ref.year, ref.month)
-    pix_in = float(pix[pix["tipo"] == "entrada"]["valor"].sum()) if not pix.empty else 0.0
-    entradas = [("lucros distribuídos", lucros), ("pró-labore líquido", pl_liq),
-                ("reembolsos", par["reembolso_base"] + _n(ref, "reembolso")),
-                ("pix", pix_in), ("dividendos", base["divs"].get(k, 0.0))]
-    return entradas, k in base["divs"]
+    _px = lambda t: float(pix[pix["tipo"] == t]["valor"].sum()) if not pix.empty else 0.0
+    return {
+        "entradas": [("lucros distribuídos", lucros), ("pró-labore líquido", pl_liq),
+                     ("reembolsos", par["reembolso_base"] + _n(ref, "reembolso")),
+                     ("outras receitas PIX", _px("entrada")), ("dividendos", base["divs"].get(k, 0.0))],
+        "saidas": [(f"fatura de {mes_label(ant)}", cartao), ("FIES", fies),
+                   ("outras despesas PIX", _px("saida"))],
+        "tem_div": k in base["divs"],
+    }
 
 
-def render_resumo_pf(entradas):
-    """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): total em cima, lista embaixo"""
-    itens = sorted([x for x in entradas if abs(x[1]) >= 0.005], key=lambda x: -x[1])
-    total = sum(v for _, v in itens)
+def render_resumo(rotulo, total, itens, cor_total=None):
+    """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): total em cima, lista embaixo.
+    itens: [(rótulo, valor, classe)] · classe 'pos' (verde), 'neg' (vermelho) ou '' (cor padrão)"""
     brl = lambda v: ("R$ " + f"{abs(v):.0f}").replace("$", "&#36;")
-    linhas = "".join(
-        f"<tr><td>{r}</td><td class='{'pos' if v >= 0 else 'neg'}'>{'' if v >= 0 else '−'}{brl(v)}</td></tr>"
-        for r, v in itens) or "<tr><td style='color:#888;'>nenhuma entrada neste mês</td></tr>"
+    linhas = "".join(f"<tr><td>{r}</td><td class='{c}'>{'−' if v < 0 else ''}{brl(v)}</td></tr>"
+                     for r, v, c in itens) \
+        or "<tr><td style='color:#888;'>nada neste mês</td></tr>"
     st.markdown(
         "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 0.6rem;'>"
-        "<p style='font-size:0.85rem;color:rgba(250,250,250,0.55);margin:0 0 2px 0;'>recebido na PF</p>"
-        f"<p style='font-size:1.6rem;font-weight:600;line-height:1.2;margin:0 0 0.9rem 0;'>{brl(total)}</p>"
+        f"<p style='font-size:0.85rem;color:rgba(250,250,250,0.55);margin:0 0 2px 0;'>{rotulo}</p>"
+        f"<p style='font-size:1.6rem;font-weight:600;line-height:1.2;margin:0 0 0.9rem 0;"
+        f"color:{cor_total or 'inherit'};'>{'−' if total < 0 else ''}{brl(total)}</p>"
         f"<table class='pf-tab'>{linhas}</table></div>", unsafe_allow_html=True)
+
+
+def render_lista_pf(rotulo, lista, cor):
+    """lista da PF do maior para o menor, sem os zerados; valor negativo fica com a cor oposta"""
+    oposta = {"pos": "neg", "neg": "pos"}[cor]
+    itens = sorted([(r, v, cor if v >= 0 else oposta) for r, v in lista if abs(v) >= 0.005], key=lambda x: -x[1])
+    render_resumo(rotulo, sum(v for _, v, _ in itens), itens)
 
 
 def salvar_configuracoes(limite, df_categorias):
@@ -1073,20 +1115,6 @@ def render_barras_categorias(df_mes, limite_mensal, df_cat):
             f"<span>parcelamentos</span><span style='color:#888;'>{formatar_brl(gasto_parcel_mes)}</span></div>",
             unsafe_allow_html=True,
         )
-
-
-def render_cards_3(blocos):
-    """painel do mês com 3 números (mesmo visual do painel da fatura): [(rótulo, valor)]"""
-    def bloco(rotulo, valor, alinhar):
-        return (f"<div style='justify-self:{alinhar};text-align:center;'>"
-                f"<div style='font-size:12px;color:rgba(250,250,250,0.55);margin-bottom:2px;'>{rotulo}</div>"
-                f"<div style='font-size:1.6rem;font-weight:600;line-height:1.15;'>{valor:.0f}</div></div>")
-    st.markdown(
-        "<div style='border:1px solid #202024;border-radius:12px;padding:1rem 1.1rem 1.1rem;'>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;align-items:end;column-gap:12px;'>"
-        + "".join(bloco(r.replace("$", "&#36;"), v, al)
-                  for (r, v), al in zip(blocos, ["start", "center", "end"]))
-        + "</div></div>", unsafe_allow_html=True)
 
 
 def linha_item(item_id, titulo, sub, valor_html, ao_editar, ao_excluir, pergunta):
@@ -1378,6 +1406,12 @@ with aba_lancar:
     df_mes = filtrar_mes(carregar_lancamentos(), ref.year, ref.month)
     render_cards_limite(df_mes, limite_mensal, ref)
     st.write("")
+    # resumo: o que saiu da conta PF no mês (fatura do mês anterior, FIES e outras despesas PIX)
+    try:
+        render_lista_pf("pago pela PF", fluxo_pf(ref, carregar_notas())["saidas"], "neg")
+    except Exception as e:
+        st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
+    st.write("")
     with st.container(key="novo_despesa"):
         if st.button("+ nova despesa", use_container_width=True):
             dialogo_despesa()
@@ -1457,14 +1491,14 @@ with aba_receitas:
     df_pix_rec = filtrar_mes(carregar_pix(), ref_rec.year, ref_rec.month)
     df_pix_rec = df_pix_rec[df_pix_rec["tipo"] == "entrada"] if not df_pix_rec.empty else df_pix_rec
 
-    # resumo: só o que entrou e saiu da conta PF no mês (o histórico abaixo mostra as notas brutas)
+    # resumo: só o que entrou na conta PF no mês (o histórico abaixo mostra as notas brutas)
     if erro_notas:
         st.warning(erro_notas)
     else:
         try:
-            _ent, _tem_div = entradas_pf(ref_rec, df_notas)
-            render_resumo_pf(_ent)
-            if not _tem_div and ref_rec == hoje_br().replace(day=1):
+            _fx = fluxo_pf(ref_rec, df_notas)
+            render_lista_pf("recebido na PF", _fx["entradas"], "pos")
+            if not _fx["tem_div"] and ref_rec == hoje_br().replace(day=1):
                 st.caption("dividendos do mês entram no resumo quando o mês fecha.")
         except Exception as e:
             st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
@@ -1521,8 +1555,10 @@ with aba_invest:
         _m = mes_anterior(_m)
         _d = filtrar_mes(df_inv, _m.year, _m.month)
         _liq.append(_tot(_d, "compra") - _tot(_d, "venda"))
-    render_cards_3([("compras (R$)", _tot(df_inv_mes, "compra")), ("vendas (R$)", _tot(df_inv_mes, "venda")),
-                    ("média 6m (R$)", sum(_liq) / 6)])
+    _compras, _vendas = _tot(df_inv_mes, "compra"), _tot(df_inv_mes, "venda")
+    render_resumo("saldo do mês", _compras - _vendas,
+                  [("compras", _compras, "pos" if _compras else ""), ("vendas", -_vendas, "neg" if _vendas else ""),
+                   ("média dos últimos 6 meses", sum(_liq) / 6, "")])
     if erro_inv:
         st.warning(erro_inv)
     st.write("")
@@ -1548,7 +1584,7 @@ with aba_invest:
                 f"i{idx_row}_{it['data']}_{it['ativo']}_{it['total']}",
                 it["ativo"],
                 f"{it['tipo']} · {fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])} · {it['data'].strftime('%d/%m/%y')}",
-                (f"<span style='color:#1D9E75;'>+ {formatar_brl(it['total'])}</span>" if compra
+                (f"<span style='color:#1D9E75;'>{formatar_brl(it['total'])}</span>" if compra
                  else (f"− {formatar_brl(it['total'])}" if it["tipo"] == "venda" else formatar_brl(it["total"]))),
                 lambda it=it: dialogo_investimento(df_inv, ativos_inv, it),
                 lambda it=it: excluir_investimento(it["data"], it["tipo"], it["ativo"], it["quantidade"], it["total"]),
