@@ -212,17 +212,19 @@ div[class*="st-key-novo_"] button {
     font-size: 0.9rem !important;
     border-radius: 8px !important;
 }
-/* lista do resumo da aba receitas: sem grade, só uma linha fina entre os itens (como no SmartWallet) */
+/* listas dos resumos (despesas, receitas, investimentos, resumo): sem grade, só uma linha fina entre os itens (como no SmartWallet) */
 table.pf-tab { width: 100% !important; border-collapse: collapse !important; border: none !important;
-    margin: 0 !important; font-size: 0.95rem; }
+    margin: 0 !important; font-size: 0.82rem; line-height: 1.25; }
 table.pf-tab tr, table.pf-tab tr:nth-child(even) { border: none !important; background: transparent !important; }
-table.pf-tab td { padding: 0.55rem 0.3rem !important; border: none !important;
+table.pf-tab td { padding: 0.32rem 0.2rem !important; border: none !important;
     border-bottom: 1px solid rgba(250,250,250,0.08) !important; background: transparent !important; }
 table.pf-tab td:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.pf-tab td.pos { color: #22c55e; }
 table.pf-tab td.neg { color: #ef4444; }
 table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250,0.7);
-    font-weight: 600; font-size: 0.9rem; }
+    font-weight: 600; font-size: 0.8rem; }
+table.pf-tab tr.sec td { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(250,250,250,0.45); padding-top: 0.55rem !important; text-align: left !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -821,14 +823,15 @@ MESES_EXT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho"
 def render_resumo(titulo, itens, rotulo_total, total):
     """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): título pequeno, lista
     e o total discreto na última linha. itens: [(rótulo, valor, classe)] · classe 'pos' (verde),
-    'neg' (vermelho) ou '' (cor padrão)"""
+    'neg' (vermelho), '' (cor padrão) ou 'sec' (subtítulo de grupo, sem valor)"""
     brl = lambda v: ("−" if v < -0.004 else "") + ("R$ " + f"{abs(v):.0f}").replace("$", "&#36;")
-    linhas = "".join(f"<tr><td>{r}</td><td class='{c}'>{brl(v)}</td></tr>" for r, v, c in itens) \
+    linhas = "".join(f"<tr class='sec'><td colspan='2'>{r}</td></tr>" if c == "sec"
+                     else f"<tr><td>{r}</td><td class='{c}'>{brl(v)}</td></tr>" for r, v, c in itens) \
         or "<tr><td style='color:#888;'>nada neste mês</td><td></td></tr>"
     linhas += f"<tr class='tot'><td>{rotulo_total}</td><td>{brl(total)}</td></tr>"
     st.markdown(
-        "<div style='border:1px solid #202024;border-radius:12px;padding:0.9rem 1.1rem 0.5rem;'>"
-        f"<p style='font-size:0.85rem;color:rgba(250,250,250,0.55);margin:0 0 0.3rem 0;'>{titulo}</p>"
+        "<div style='border:1px solid #202024;border-radius:12px;padding:0.7rem 0.9rem 0.35rem;'>"
+        f"<p style='font-size:0.75rem;color:rgba(250,250,250,0.55);margin:0 0 0.15rem 0;'>{titulo}</p>"
         f"<table class='pf-tab'>{linhas}</table></div>", unsafe_allow_html=True)
 
 
@@ -1398,8 +1401,8 @@ def dialogo_novo_ativo(ativos_inv):
 if st.session_state.get("_msg"):
     st.toast(st.session_state.pop("_msg"))
 
-aba_lancar, aba_receitas, aba_invest, aba_orc = st.tabs(
-    ["despesas", "receitas", "investimentos", "orçamento"]
+aba_lancar, aba_receitas, aba_invest, aba_resumo, aba_orc = st.tabs(
+    ["despesas", "receitas", "investimentos", "resumo", "orçamento"]
 )
 
 # ───────────────────────── ABA: DESPESAS ─────────────────────────
@@ -1595,6 +1598,28 @@ with aba_invest:
                 lambda it=it: dialogo_investimento(df_inv, ativos_inv, it),
                 lambda it=it: excluir_investimento(it["data"], it["tipo"], it["ativo"], it["quantidade"], it["total"]),
                 "excluir este investimento?")
+
+# ───────────────────────── ABA: RESUMO ─────────────────────────
+# movimentação da conta PF no mês: entradas (receitas) e saídas (despesas + investido), e o saldo
+
+with aba_resumo:
+    render_nav_mes("res")
+    ref_res = st.session_state["mes_ref"]
+    try:
+        _fx = fluxo_pf(ref_res, carregar_notas())
+        _inv = filtrar_mes(carregar_investimentos(), ref_res.year, ref_res.month)
+        _ti = lambda t: float(_inv[_inv["tipo"] == t]["total"].sum()) if not _inv.empty else 0.0
+        _ent = sorted([(r, v) for r, v in _fx["entradas"] if abs(v) >= 0.005], key=lambda x: -x[1])
+        _sai = sorted([(r, v) for r, v in _fx["saidas"] + [("investido", _ti("compra") - _ti("venda"))]
+                       if abs(v) >= 0.005], key=lambda x: -x[1])
+        _itens = [("entradas", 0, "sec")] + [(r, v, "pos" if v >= 0 else "neg") for r, v in _ent] \
+            + [("saídas", 0, "sec")] + [(r, -v, "neg" if v >= 0 else "pos") for r, v in _sai]
+        render_resumo(f"movimentação da conta em {MESES_EXT[ref_res.month - 1]}", _itens, "saldo",
+                      sum(v for _, v in _ent) - sum(v for _, v in _sai))
+        if not _fx["tem_div"] and ref_res == hoje_br().replace(day=1):
+            st.caption("dividendos do mês entram no resumo quando o mês fecha.")
+    except Exception as e:
+        st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
 
 # ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
 
