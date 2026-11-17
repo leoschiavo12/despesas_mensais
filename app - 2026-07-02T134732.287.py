@@ -223,35 +223,27 @@ table.pf-tab td.pos { color: #22c55e; }
 table.pf-tab td.neg { color: #ef4444; }
 table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250,0.7);
     font-weight: 600; font-size: 0.8rem; }
-/* painel de categorias e histórico da aba despesas */
-.st-key-cat_box { border: 1px solid #202024 !important; border-radius: 12px !important;
-    padding: 0.7rem 0.9rem 0.6rem !important; gap: 0 !important; }
-.st-key-cat_box [data-testid="stMarkdownContainer"],
+/* painel de categorias e históricos (despesas, receitas, investimentos) */
+.cat-box { border: 1px solid #202024; border-radius: 12px; padding: 0.7rem 0.9rem 0.6rem; }
 [class*="st-key-hrow_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
-.st-key-cat_box [data-testid="stElementContainer"] { margin: 0 !important; }
 .box-tit { font-size: 0.75rem !important; color: rgba(250,250,250,0.55); margin: 0 0 0.25rem 0; }
 .box-vazio { font-size: 0.7rem !important; color: #888; margin: 0.5rem 0 0.1rem 0; }
-[class*="st-key-catrow_"], [class*="st-key-hrow_"] { position: relative !important; gap: 0 !important; }
-/* o botão fica invisível por cima da linha inteira: tocar em qualquer ponto aciona */
-[class*="st-key-catbtn_"], [class*="st-key-hbtn_"] { position: absolute !important; inset: 0 !important;
-    z-index: 2 !important; margin: 0 !important; }
-[class*="st-key-catbtn_"] div[data-testid="stButton"], [class*="st-key-hbtn_"] div[data-testid="stButton"],
-[class*="st-key-catbtn_"] button, [class*="st-key-hbtn_"] button {
+[class*="st-key-hrow_"] { position: relative !important; gap: 0 !important; }
+/* o botão fica invisível por cima da linha inteira: tocar em qualquer ponto abre a edição */
+[class*="st-key-hbtn_"] { position: absolute !important; inset: 0 !important; z-index: 2 !important; margin: 0 !important; }
+[class*="st-key-hbtn_"] div[data-testid="stButton"], [class*="st-key-hbtn_"] button {
     width: 100% !important; height: 100% !important; min-height: 0 !important; }
-[class*="st-key-catbtn_"] button, [class*="st-key-hbtn_"] button { opacity: 0 !important; cursor: pointer; }
-.cat-lin { padding: 0.5rem 0.3rem 0.45rem; border-bottom: 1px solid rgba(250,250,250,0.06); border-radius: 6px; }
-.cat-lin.sel { background: rgba(250,250,250,0.06); }
-[class*="st-key-catrow_"]:hover .cat-lin, [class*="st-key-hrow_"]:hover .h-lin { background: rgba(250,250,250,0.03); }
+[class*="st-key-hbtn_"] button { opacity: 0 !important; cursor: pointer; }
+.cat-lin { padding: 0.5rem 0.3rem 0.45rem; border-bottom: 1px solid rgba(250,250,250,0.06); }
+[class*="st-key-hrow_"]:hover .h-lin { background: rgba(250,250,250,0.03); }
 .cat-top { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
 .cat-top i, .h-lin > i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px;
     vertical-align: middle; flex: 0 0 auto; }
 .cat-dir { font-size: 0.76rem; color: #9a9a9a; white-space: nowrap; }
 .cat-bar { position: relative; height: 5px; background: #202024; border-radius: 4px; margin: 5px 0 3px; }
 .cat-bar > div { height: 100%; border-radius: 4px; }
-.cat-bar > b { position: absolute; top: -2px; width: 2px; height: 9px; background: rgba(250,250,250,0.55);
-    border-radius: 1px; }
 .cat-sub { font-size: 0.68rem; color: #7a7a7a; }
-.st-key-hist_filtros [data-testid="stHorizontalBlock"] { align-items: center; }
+[class*="st-key-hist_filtros"] [data-testid="stHorizontalBlock"] { align-items: center; }
 .h-dia { display: flex; justify-content: space-between; font-size: 0.68rem; text-transform: uppercase;
     letter-spacing: 0.05em; color: rgba(250,250,250,0.45); margin: 0.9rem 0.2rem 0.15rem; }
 .h-lin { display: flex; align-items: center; padding: 0.45rem 0.2rem; border-bottom: 1px solid rgba(250,250,250,0.06);
@@ -262,6 +254,25 @@ table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250
 .chip { display: inline-block; font-size: 0.62rem; padding: 0 5px; margin-left: 6px; border-radius: 4px;
     background: rgba(250,250,250,0.08); color: #bbb; line-height: 1.5; }
 .h-val { font-size: 0.86rem; white-space: nowrap; margin-left: 10px; font-variant-numeric: tabular-nums; }
+/* aba config */
+:is(.st-key-cfg_box_lim, .st-key-cfg_box_cat) { border: 1px solid #202024 !important; border-radius: 12px !important;
+    padding: 0.7rem 0.9rem !important; gap: 0.15rem !important; }
+:is(.st-key-cfg_box_lim, .st-key-cfg_box_cat) [data-testid="stHorizontalBlock"] { align-items: center !important;
+    flex-wrap: nowrap !important; gap: 0.5rem !important; }
+[class*="st-key-cfgrow_"] { border-bottom: 1px solid rgba(250,250,250,0.06); padding: 0.15rem 0 0.25rem; }
+:is(.st-key-cfg_box_lim, .st-key-cfg_box_cat) [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+:is(.st-key-cfg_box_lim, .st-key-cfg_box_cat) div[data-baseweb="input"] { height: 2.1rem !important; min-height: 2.1rem !important; }
+:is(.st-key-cfg_box_lim, .st-key-cfg_box_cat) input { text-align: right; }
+.cfg-rot { font-size: 0.86rem; }
+.cfg-dica { font-size: 0.68rem; color: #8a8a8a; }
+.cfg-cab { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(250,250,250,0.45);
+    white-space: nowrap; }
+.cfg-nome { font-size: 0.84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg-nome i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.cfg-media { font-size: 0.74rem; color: #8a8a8a; text-align: right; white-space: nowrap; }
+.cfg-dist { margin-top: 0.6rem; }
+div[class*="st-key-novo_cfg"] button { min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
+    font-size: 0.9rem !important; border-radius: 8px !important; }
 table.pf-tab tr.sec td { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: rgba(250,250,250,0.45); padding-top: 0.55rem !important; text-align: left !important; }
 </style>
@@ -1138,180 +1149,160 @@ DIAS_SEM = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 RE_PARC_DESC = re.compile(r"^(.*) \((\d+/\d+)\)$")
 
 
-def _pct_mes_decorrido(ref):
-    hoje = hoje_br()
-    if (ref.year, ref.month) < (hoje.year, hoje.month):
-        return 1.0
-    return hoje.day / calendar.monthrange(hoje.year, hoje.month)[1]
-
-
-def _filtrar_categoria(cid):
-    """toque numa categoria: filtra o histórico por ela (tocar de novo limpa o filtro)"""
-    st.session_state["hist_cat"] = "__todas__" if st.session_state.get("hist_cat") == cid else cid
-    st.session_state["hist_lim"] = 15
-
-
 def render_categorias(df_mes, df_cat, ref):
-    """gastos do cartão por categoria: barra com o ritmo do mês (traço = quanto do mês já passou),
-    quanto falta ou quanto passou do orçamento. ordem: estouradas, acima do ritmo, demais"""
-    pct_mes = _pct_mes_decorrido(ref)
+    """gastos do cartão por categoria, do maior para o menor: quanto falta ou quanto passou do
+    orçamento. barra cinza; vermelha quando passa do orçamento"""
     gasto = df_mes.groupby("categoria")["valor"].sum().to_dict() if not df_mes.empty else {}
-    sel = st.session_state.get("hist_cat", "__todas__")
     brl = lambda v: formatar_brl(v).replace("$", "&#36;")
     linhas, sem_gasto = [], []
-    for _, c in df_cat[df_cat["id"] != FIXED_ID].iterrows():
+    for _, c in df_cat.iterrows():
         g, o = float(gasto.get(c["id"], 0.0)), float(c["valor_alvo"] or 0)
         if g < 0.005:
-            sem_gasto.append(c["nome"].lower())
+            if c["id"] != FIXED_ID:
+                sem_gasto.append(c["nome"].lower())
             continue
         p = g / o if o > 0 else None
-        if p is not None and p > 1:
-            ordem, cor, direita = 0, "#e05252", f"<span style='color:#e05252;'>passou {brl(g - o)}</span>"
-        elif p is not None and p > pct_mes:
-            ordem, cor, direita = 1, "#E5B800", f"<span style='color:#E5B800;'>faltam {brl(o - g)}</span>"
+        if c["id"] == FIXED_ID:
+            cor, direita, sub = None, brl(g), None
+        elif p is not None and p > 1:
+            cor, direita = "#e05252", f"<span style='color:#e05252;'>passou {brl(g - o)}</span>"
+            sub = f"{brl(g)} de {brl(o)} · {fmt_pct(p * 100)}"
         elif p is not None:
-            ordem, cor, direita = 2, "#6b7280", f"faltam {brl(o - g)}"
+            cor, direita, sub = "#6b7280", f"faltam {brl(o - g)}", f"{brl(g)} de {brl(o)} · {fmt_pct(p * 100)}"
         else:
-            ordem, cor, direita = 3, "#6b7280", "sem orçamento"
-        sub = f"{brl(g)} de {brl(o)} · {fmt_pct(p * 100)}" if p is not None else brl(g)
-        linhas.append((ordem, -(p or 0), -g, c["id"], c["nome"].lower(), c["cor"], cor, direita, sub,
-                       min(p or 0, 1) * 100))
+            cor, direita, sub = None, brl(g), "sem orçamento"
+        linhas.append((-g, c["nome"].lower(), c["cor"], cor, direita, sub, min(p or 0, 1) * 100))
     linhas.sort()
-    parcel = float(gasto.get(FIXED_ID, 0.0))
 
-    with st.container(key="cat_box"):
-        st.markdown(f"<div class='box-tit'>categorias em {MESES_EXT[ref.month - 1]}</div>", unsafe_allow_html=True)
-        if not linhas and not parcel:
-            st.markdown("<div class='box-vazio'>nenhum gasto no cartão neste mês.</div>", unsafe_allow_html=True)
-        for _, _, _, cid, nome, cor_cat, cor, direita, sub, w in linhas:
-            with st.container(key=f"catrow_{cid}"):
-                st.markdown(
-                    f"<div class='cat-lin{' sel' if sel == cid else ''}'>"
-                    f"<div class='cat-top'><span><i style='background:{cor_cat};'></i>{nome}</span>"
-                    f"<span class='cat-dir'>{direita}</span></div>"
-                    f"<div class='cat-bar'><div style='width:{w:.1f}%;background:{cor};'></div>"
-                    f"<b style='left:{pct_mes * 100:.1f}%;'></b></div>"
-                    f"<div class='cat-sub'>{sub}</div></div>", unsafe_allow_html=True)
-                st.button(nome, key=f"catbtn_{cid}", on_click=_filtrar_categoria, args=(cid,))
-        if parcel:
-            with st.container(key=f"catrow_{FIXED_ID}"):
-                st.markdown(
-                    f"<div class='cat-lin{' sel' if sel == FIXED_ID else ''}'>"
-                    f"<div class='cat-top'><span><i style='background:#E5B800;'></i>parcelamentos</span>"
-                    f"<span class='cat-dir'>{brl(parcel)}</span></div></div>", unsafe_allow_html=True)
-                st.button("parcelamentos", key=f"catbtn_{FIXED_ID}", on_click=_filtrar_categoria,
-                          args=(FIXED_ID,))
-        if sem_gasto:
-            st.markdown(f"<div class='box-vazio'>sem gastos: {', '.join(sorted(sem_gasto))}</div>",
-                        unsafe_allow_html=True)
+    html = f"<div class='box-tit'>categorias em {MESES_EXT[ref.month - 1]}</div>"
+    if not linhas:
+        html += "<div class='box-vazio'>nenhum gasto no cartão neste mês.</div>"
+    for _, nome, cor_cat, cor, direita, sub, w in linhas:
+        html += (f"<div class='cat-lin'><div class='cat-top'><span><i style='background:{cor_cat};'></i>{nome}</span>"
+                 f"<span class='cat-dir'>{direita}</span></div>"
+                 + (f"<div class='cat-bar'><div style='width:{w:.1f}%;background:{cor};'></div></div>" if cor else "")
+                 + (f"<div class='cat-sub'>{sub}</div>" if sub else "") + "</div>")
+    if sem_gasto:
+        html += f"<div class='box-vazio'>sem gastos: {', '.join(sorted(sem_gasto))}</div>"
+    st.markdown(f"<div class='cat-box'>{html}</div>", unsafe_allow_html=True)
+
+
+def rotulo_dia(d):
+    hoje = hoje_br()
+    if d == hoje:
+        return "hoje"
+    if d == hoje - timedelta(days=1):
+        return "ontem"
+    return f"{DIAS_SEM[d.weekday()]}, {d.strftime('%d/%m')}"
+
+
+def render_lista_dias(itens, prefixo, abrir, vazio):
+    """histórico agrupado por dia, com o total do dia; tocar numa linha chama abrir(item).
+    itens (já filtrados, mais recente primeiro): {data, titulo, sub, cor, valor_html, soma, item}"""
+    if not itens:
+        st.caption(vazio)
+        return
+    chave_lim = f"{prefixo}_lim"
+    st.session_state.setdefault(chave_lim, 15)
+    lim = st.session_state[chave_lim]
+    brl = lambda v: ("−" if v < -0.004 else "") + formatar_brl(abs(v)).replace("$", "&#36;")
+    tot_dia = {}
+    for it in itens:
+        tot_dia[it["data"]] = tot_dia.get(it["data"], 0.0) + it["soma"]
+    dia_atual = None
+    for i, it in enumerate(itens[:lim]):
+        if it["data"] != dia_atual:
+            dia_atual = it["data"]
+            st.markdown(f"<div class='h-dia'><span>{rotulo_dia(dia_atual)}</span>"
+                        f"<span>{brl(tot_dia[dia_atual])}</span></div>", unsafe_allow_html=True)
+        with st.container(key=f"hrow_{prefixo}{i}"):
+            st.markdown(
+                f"<div class='h-lin'><i style='background:{it['cor']};'></i>"
+                f"<div class='h-txt'><div class='h-tit'>{it['titulo']}</div>"
+                f"<div class='h-sub'>{it['sub']}</div></div>"
+                f"<div class='h-val'>{it['valor_html']}</div></div>", unsafe_allow_html=True)
+            if st.button(it["titulo"], key=f"hbtn_{prefixo}{i}"):
+                st.session_state.pop("_conf_del", None)
+                abrir(it["item"])
+    if len(itens) > lim:
+        st.button(f"ver mais ({len(itens) - lim})", key=f"{prefixo}_mais", use_container_width=True,
+                  on_click=lambda: st.session_state.update({chave_lim: lim + 30}))
+
+
+def filtro_tipo(prefixo, opcoes):
+    """filtro em botões (todos · ...) acima do histórico"""
+    with st.container(key=f"hist_filtros_{prefixo}"):
+        return st.segmented_control("filtro", opcoes, default=opcoes[0], key=f"{prefixo}_filtro",
+                                    label_visibility="collapsed") or opcoes[0]
 
 
 def render_historico(df_mes, df_pix, df_cat, ref):
-    """histórico do mês (cartão + pix): filtros, agrupado por dia com o total de cada dia.
-    tocar numa linha abre a janela de edição (com excluir)"""
-    if "hist_cat" not in st.session_state:
-        st.session_state["hist_cat"] = "__todas__"
-    st.session_state.setdefault("hist_lim", 15)
+    """histórico de despesas do mês (cartão + pix): filtros de pagamento e categoria"""
     nomes = dict(zip(df_cat["id"], df_cat["nome"].str.lower()))
     cores = dict(zip(df_cat["id"], df_cat["cor"]))
-    if st.session_state["hist_cat"] not in nomes and st.session_state["hist_cat"] != "__todas__":
+    st.session_state.setdefault("hist_cat", "__todas__")
+    if st.session_state["hist_cat"] not in nomes:
         st.session_state["hist_cat"] = "__todas__"
-
     with st.container(key="hist_filtros"):
         col_pag, col_cat = st.columns([1.15, 1])
         with col_pag:
             pag = st.segmented_control("pagamento", ["todos", "cartão", "pix"], default="todos",
                                        key="hist_pag", label_visibility="collapsed") or "todos"
         with col_cat:
-            st.selectbox("categoria", ["__todas__"] + sorted(nomes, key=lambda x: nomes[x]), key="hist_cat",
-                         format_func=lambda x: "todas as categorias" if x == "__todas__" else nomes[x],
-                         label_visibility="collapsed")
-    cat = st.session_state["hist_cat"]
+            cat = st.selectbox("categoria", ["__todas__"] + sorted(nomes, key=lambda x: nomes[x]), key="hist_cat",
+                               format_func=lambda x: "todas as categorias" if x == "__todas__" else nomes[x],
+                               label_visibility="collapsed")
 
     _cart = df_mes.iloc[::-1].assign(pagamento="cartão") if not df_mes.empty else df_mes
     _pix = (df_pix.iloc[::-1][["data", "categoria", "descricao", "valor"]].assign(pagamento="pix")
             if not df_pix.empty else df_pix)
     partes = [x for x in [_cart, _pix] if not x.empty]
-    if not partes:
-        st.caption("nenhuma despesa neste mês.")
-        return
-    df = pd.concat(partes, ignore_index=True).sort_values("data", ascending=False, kind="mergesort")
+    df = (pd.concat(partes, ignore_index=True).sort_values("data", ascending=False, kind="mergesort")
+          if partes else pd.DataFrame(columns=["data", "categoria", "descricao", "valor", "pagamento"]))
     if pag != "todos":
         df = df[df["pagamento"] == pag]
     if cat != "__todas__":
         df = df[df["categoria"] == cat]
-    if df.empty:
-        st.caption("nada com esses filtros.")
-        return
 
-    hoje = hoje_br()
-    lim = st.session_state["hist_lim"]
-    brl = lambda v: formatar_brl(v).replace("$", "&#36;")
-    tot_dia = df.groupby("data")["valor"].sum().to_dict()
-    dia_atual = None
-    for i, (_, r) in enumerate(df.head(lim).iterrows()):
-        d = r["data"]
-        if d != dia_atual:
-            dia_atual = d
-            rot = ("hoje" if d == hoje else "ontem" if d == hoje - timedelta(days=1)
-                   else f"{DIAS_SEM[d.weekday()]}, {d.strftime('%d/%m')}")
-            st.markdown(f"<div class='h-dia'><span>{rot}</span><span>{brl(tot_dia[d])}</span></div>",
-                        unsafe_allow_html=True)
+    itens = []
+    for _, r in df.iterrows():
         desc = str(r["descricao"] or "")
         m = RE_PARC_DESC.match(desc)
-        titulo = (m.group(1) if m else desc) or nomes.get(r["categoria"], "sem categoria")
+        nome_cat = nomes.get(r["categoria"], "sem categoria")
+        titulo = (m.group(1) if m else desc) or nome_cat
         chips = ("<span class='chip'>pix</span>" if r["pagamento"] == "pix" else "") \
             + (f"<span class='chip'>{m.group(2)}</span>" if m else "")
-        it = {"pagamento": r["pagamento"], "data": d, "categoria": r["categoria"],
-              "descricao": desc, "valor": float(r["valor"])}
-        with st.container(key=f"hrow_{i}"):
-            st.markdown(
-                f"<div class='h-lin'><i style='background:{cores.get(r['categoria'], '#666')};'></i>"
-                f"<div class='h-txt'><div class='h-tit'>{titulo}</div>"
-                f"<div class='h-sub'>{nomes.get(r['categoria'], 'sem categoria')}{chips}</div></div>"
-                f"<div class='h-val'>{brl(it['valor'])}</div></div>", unsafe_allow_html=True)
-            if st.button(titulo, key=f"hbtn_{i}"):
-                st.session_state.pop("_conf_del", None)
-                dialogo_despesa(it)
-    if len(df) > lim:
-        st.button(f"ver mais ({len(df) - lim})", key="hist_mais", use_container_width=True,
-                  on_click=lambda: st.session_state.update(hist_lim=st.session_state["hist_lim"] + 30))
-    st.write("")
-    csv = df[["data", "categoria", "descricao", "valor", "pagamento"]].rename(
-        columns={"descricao": "descrição", "valor": "valor (R$)"}).to_csv(index=False).encode("utf-8")
-    st.download_button("exportar csv", csv, f"fatura_{mes_label(ref).replace('/', '_')}.csv", "text/csv")
+        itens.append({"data": r["data"], "titulo": titulo, "sub": nome_cat + chips,
+                      "cor": cores.get(r["categoria"], "#666"),
+                      "valor_html": formatar_brl(float(r["valor"])).replace("$", "&#36;"),
+                      "soma": float(r["valor"]),
+                      "item": {"pagamento": r["pagamento"], "data": r["data"], "categoria": r["categoria"],
+                               "descricao": desc, "valor": float(r["valor"])}})
+    render_lista_dias(itens, "d", dialogo_despesa,
+                      "nada com esses filtros." if (pag != "todos" or cat != "__todas__") else "nenhuma despesa neste mês.")
+    if not df.empty:
+        st.write("")
+        csv = df[["data", "categoria", "descricao", "valor", "pagamento"]].rename(
+            columns={"descricao": "descrição", "valor": "valor (R$)"}).to_csv(index=False).encode("utf-8")
+        st.download_button("exportar csv", csv, f"fatura_{mes_label(ref).replace('/', '_')}.csv", "text/csv")
 
 
-def linha_item(item_id, titulo, sub, valor_html, ao_editar, ao_excluir, pergunta):
-    """linha do histórico: título + detalhe · ✎ editar · ✕ excluir (com confirmação) · valor"""
-    pendente_key = f"pendente_del_{item_id}"
-    col_desc, col_ed, col_del, col_val = st.columns([3.0, 0.8, 0.8, 1.7])
-    with col_desc:
-        st.markdown(f"**{titulo}**  \n<span style='color:#888;font-size:12px;'>{sub}</span>".replace("$", "&#36;"),
-                    unsafe_allow_html=True)
-    with col_ed:
-        if st.button("✎", key=f"ed_{item_id}", use_container_width=True):
-            ao_editar()
-    with col_del:
-        if not st.session_state.get(pendente_key):
-            if st.button("✕", key=f"del_{item_id}", use_container_width=True):
-                st.session_state[pendente_key] = True
-                st.rerun()
-    with col_val:
-        st.markdown(f"<div style='text-align:right;padding-top:0.5rem;'>{valor_html}</div>", unsafe_allow_html=True)
-    if st.session_state.get(pendente_key):
-        st.markdown(f"<div style='font-size:12px;color:#888;margin-top:-4px;margin-bottom:4px;'>{pergunta}</div>",
-                    unsafe_allow_html=True)
-        col_confirma, col_cancela = st.columns(2)
-        with col_confirma:
-            if st.button("confirmar exclusão", key=f"ok_{item_id}", use_container_width=True, type="primary"):
-                ao_excluir()
-                st.session_state.pop(pendente_key, None)
-                st.rerun()
-        with col_cancela:
-            if st.button("cancelar", key=f"cancel_{item_id}", use_container_width=True):
-                st.session_state.pop(pendente_key, None)
-                st.rerun()
+def botao_excluir(excluir, chave, rotulo="excluir"):
+    """botão de excluir dentro da janela de edição, com confirmação"""
+    if not st.session_state.get("_conf_del"):
+        st.button(rotulo, use_container_width=True, key=f"{chave}_del",
+                  on_click=lambda: st.session_state.update(_conf_del=True))
+        return
+    st.caption("tem certeza? não dá para desfazer.")
+    col_ok, col_nao = st.columns(2)
+    with col_ok:
+        if st.button("confirmar exclusão", type="primary", use_container_width=True, key=f"{chave}_del_ok"):
+            excluir()
+            st.session_state.pop("_conf_del", None)
+            _fechar("excluído!")
+    with col_nao:
+        st.button("cancelar", use_container_width=True, key=f"{chave}_del_nao",
+                  on_click=lambda: st.session_state.pop("_conf_del", None))
 
 
 def _txt_valor(v):
@@ -1404,25 +1395,12 @@ def dialogo_despesa(item=None):
 
     # edição: excluir o lançamento pela mesma janela (com confirmação)
     if item:
-        if not st.session_state.get("_conf_del"):
-            st.button("excluir lançamento", use_container_width=True, key="desp_del",
-                      on_click=lambda: st.session_state.update(_conf_del=True))
-        else:
-            st.caption("excluir este lançamento?")
-            col_ok, col_nao = st.columns(2)
-            with col_ok:
-                if st.button("confirmar exclusão", type="primary", use_container_width=True, key="desp_del_ok"):
-                    if item["pagamento"] == "pix":
-                        excluir_pix(item["data"].isoformat(), "saida", item["categoria"], item["descricao"],
-                                    item["valor"])
-                    else:
-                        excluir_lancamento(item["data"].isoformat(), item["categoria"], item["descricao"],
-                                           item["valor"])
-                    st.session_state.pop("_conf_del", None)
-                    _fechar("excluído!")
-            with col_nao:
-                st.button("cancelar", use_container_width=True, key="desp_del_nao",
-                          on_click=lambda: st.session_state.pop("_conf_del", None))
+        def _excluir():
+            if item["pagamento"] == "pix":
+                excluir_pix(item["data"].isoformat(), "saida", item["categoria"], item["descricao"], item["valor"])
+            else:
+                excluir_lancamento(item["data"].isoformat(), item["categoria"], item["descricao"], item["valor"])
+        botao_excluir(_excluir, "desp", "excluir lançamento")
 
 
 @st.dialog("adiantar parcelas")
@@ -1490,6 +1468,14 @@ def dialogo_receita(item=None, erro_notas=None):
                     _fechar(f"registrada! entra no caixa de {MESES3[cx.month - 1]}/{str(cx.year)[2:]}")
                 _fechar("registrado!")
 
+    if item:
+        def _excluir():
+            if item["origem"] == "pix":
+                excluir_pix(item["data"].isoformat(), "entrada", item["categoria"], item["descricao"], item["valor"])
+            else:
+                excluir_nota(item["tipo"], item["data_txt"], item["valor"], item["descricao"])
+        botao_excluir(_excluir, "rec", "excluir receita")
+
 
 @st.dialog("aporte")
 def dialogo_investimento(df_inv, ativos_inv, item=None):
@@ -1545,6 +1531,10 @@ def dialogo_investimento(df_inv, ativos_inv, item=None):
                 salvar_investimento(data_lanc, tipo, ativo, classes[ativo], qtd, preco)
                 _fechar("registrado!")
 
+    if item:
+        botao_excluir(lambda: excluir_investimento(item["data"], item["tipo"], item["ativo"],
+                                                   item["quantidade"], item["total"]), "inv", "excluir lançamento")
+
 
 # classificação do ativo novo num campo só: (rótulo, classe, tipo, indexador, país)
 TIPOS_ATIVO = ([("FII de tijolo", "FII", "tijolo", None, None),
@@ -1581,7 +1571,7 @@ if st.session_state.get("_msg"):
     st.toast(st.session_state.pop("_msg"))
 
 aba_lancar, aba_receitas, aba_invest, aba_resumo, aba_orc = st.tabs(
-    ["despesas", "receitas", "investimentos", "resumo", "orçamento"]
+    ["despesas", "receitas", "investimentos", "resumo", "config"]
 )
 
 # ───────────────────────── ABA: DESPESAS ─────────────────────────
@@ -1666,29 +1656,29 @@ with aba_receitas:
             dialogo_receita(erro_notas=erro_notas)
     st.write("")
 
+    # histórico: notas pelo valor bruto, na data de emissão; reembolsos e pix de entrada
+    filtro_rec = filtro_tipo("r", ["todas", "notas", "reembolsos", "pix"])
+    _cor_rec = {"nota fiscal": "#1D9E75", "reembolso": "#7F77DD", "pix": "#BA7517"}
     itens = []
     if not df_notas_mes.empty:
-        for _, r in df_notas_mes.iterrows():
+        for _, r in df_notas_mes.iloc[::-1].iterrows():
             itens.append({"origem": "nota", "tipo": r["tipo"], "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "data_txt": r["data_txt"]})
     if not df_pix_rec.empty:
         for _, r in df_pix_rec.iloc[::-1].iterrows():
             itens.append({"origem": "pix", "tipo": "pix", "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "categoria": r["categoria"]})
-    if not itens:
-        st.caption("nenhuma receita neste mês.")
-    for idx_row, it in enumerate(sorted(itens, key=lambda x: x["data"], reverse=True)):
-        def _excluir_rec(it=it):
-            if it["origem"] == "pix":
-                excluir_pix(it["data"].isoformat(), "entrada", it["categoria"], it["descricao"], it["valor"])
-            else:
-                excluir_nota(it["tipo"], it["data_txt"], it["valor"], it["descricao"])
-
-        linha_item(
-            f"r{idx_row}_{it['data']}_{it['tipo']}_{it['valor']}",
-            it["descricao"] or it["tipo"], f"{it['tipo']} · {it['data'].strftime('%d/%m/%y')}",
-            f"<span style='color:#1D9E75;'>+ {formatar_brl(it['valor'])}</span>",
-            lambda it=it: dialogo_receita(it, erro_notas), _excluir_rec, "excluir esta receita?")
+    _mapa_f = {"notas": "nota fiscal", "reembolsos": "reembolso", "pix": "pix"}
+    if filtro_rec != "todas":
+        itens = [it for it in itens if it["tipo"] == _mapa_f[filtro_rec]]
+    itens.sort(key=lambda x: x["data"], reverse=True)
+    render_lista_dias(
+        [{"data": it["data"], "titulo": it["descricao"] or it["tipo"], "sub": it["tipo"],
+          "cor": _cor_rec.get(it["tipo"], "#666"),
+          "valor_html": f"<span style='color:#1D9E75;'>{formatar_brl(it['valor']).replace('$', '&#36;')}</span>",
+          "soma": it["valor"], "item": it} for it in itens],
+        "r", lambda it: dialogo_receita(it, erro_notas),
+        "nada com esse filtro." if filtro_rec != "todas" else "nenhuma receita neste mês.")
 
 # ───────────────────────── ABA: INVESTIMENTOS ─────────────────────────
 # compras e vendas da carteira: gravam na aba lancamentos da planilha da carteira,
@@ -1731,23 +1721,28 @@ with aba_invest:
                 dialogo_novo_ativo(ativos_inv)
     st.write("")
 
-    if df_inv_mes.empty:
-        st.caption("nenhum investimento neste mês.")
-    else:
-        df_inv_ord = df_inv_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort")
-        for idx_row, (_, r) in enumerate(df_inv_ord.iterrows()):
+    # histórico: compras e vendas; tocar na linha abre a edição (com excluir)
+    filtro_inv = filtro_tipo("i", ["todos", "compras", "vendas"])
+    _cor_cls = {"FII": "#639922", "ETF": "#378ADD", "Cripto": "#E5B800", "Tesouro Direto": "#7F77DD"}
+    itens_inv = []
+    if not df_inv_mes.empty:
+        for _, r in df_inv_mes.iloc[::-1].sort_values("data", ascending=False, kind="mergesort").iterrows():
             it = {"data": r["data"], "tipo": r["tipo"], "ativo": r["ativo"], "classe": r["classe"],
                   "quantidade": float(r["quantidade"]), "preco": float(r["preco"]), "total": float(r["total"])}
-            compra = it["tipo"] == "compra"
-            linha_item(
-                f"i{idx_row}_{it['data']}_{it['ativo']}_{it['total']}",
-                it["ativo"],
-                f"{it['tipo']} · {fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])} · {it['data'].strftime('%d/%m/%y')}",
-                (f"<span style='color:#1D9E75;'>{formatar_brl(it['total'])}</span>" if compra
-                 else (f"− {formatar_brl(it['total'])}" if it["tipo"] == "venda" else formatar_brl(it["total"]))),
-                lambda it=it: dialogo_investimento(df_inv, ativos_inv, it),
-                lambda it=it: excluir_investimento(it["data"], it["tipo"], it["ativo"], it["quantidade"], it["total"]),
-                "excluir este investimento?")
+            if filtro_inv == "compras" and it["tipo"] != "compra" or filtro_inv == "vendas" and it["tipo"] != "venda":
+                continue
+            venda = it["tipo"] == "venda"
+            _v = formatar_brl(it["total"]).replace("$", "&#36;")
+            itens_inv.append({
+                "data": it["data"], "titulo": it["ativo"],
+                "sub": f"{fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])}".replace("$", "&#36;")
+                       + f"<span class='chip'>{it['tipo']}</span>",
+                "cor": _cor_cls.get(it["classe"], "#666"),
+                "valor_html": (f"<span style='color:#e05252;'>−{_v}</span>" if venda
+                               else f"<span style='color:#1D9E75;'>{_v}</span>" if it["tipo"] == "compra" else _v),
+                "soma": -it["total"] if venda else it["total"], "item": it})
+    render_lista_dias(itens_inv, "i", lambda it: dialogo_investimento(df_inv, ativos_inv, it),
+                      "nada com esse filtro." if filtro_inv != "todos" else "nenhum investimento neste mês.")
 
 # ───────────────────────── ABA: RESUMO ─────────────────────────
 # movimentação da conta PF no mês: entradas (receitas) e saídas (despesas + investido), e o saldo
@@ -1769,83 +1764,116 @@ with aba_resumo:
     except Exception as e:
         st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
 
-# ───────────────────────── ABA: ORÇAMENTO ─────────────────────────
+# ───────────────────────── ABA: CONFIG ─────────────────────────
+# limite do cartão e orçamento por categoria (com a média dos últimos 3 meses como referência)
+
+CORES_NOVA_CAT = ["#378ADD", "#D85A30", "#639922", "#D4537E", "#7F77DD", "#1D9E75", "#BA7517", "#888780"]
+
+
+@st.dialog("nova categoria")
+def dialogo_nova_categoria(limite_salvo):
+    with st.form("form_nova_cat", border=False):
+        col_nome, col_val = st.columns([1.6, 1])
+        with col_nome:
+            nome = st.text_input("nome")
+        with col_val:
+            valor_txt = st.text_input("orçamento (R$)", placeholder="0")
+        usadas = set(df_cat["cor"])
+        cor = st.color_picker("cor", value=next((c for c in CORES_NOVA_CAT if c not in usadas), "#888780"))
+        if st.form_submit_button("adicionar categoria", use_container_width=True):
+            nome = (nome or "").strip().lower()
+            valor = parse_valor(valor_txt)
+            if not nome:
+                st.error("digite o nome da categoria.")
+            elif nome in set(df_cat["nome"].str.lower()):
+                st.error("já existe uma categoria com esse nome.")
+            elif valor > 1_000_000:
+                st.error("valor muito alto — confira se não digitou zeros a mais.")
+            else:
+                nova = pd.DataFrame([{"id": "cat_" + str(int(agora_br().timestamp())), "nome": nome, "cor": cor,
+                                      "valor_alvo": valor, "fixo": False}])
+                salvar_configuracoes(limite_salvo, pd.concat([df_cat, nova], ignore_index=True))
+                _fechar(f"'{nome}' adicionada!")
+
 
 with aba_orc:
-    if "orc_versao" not in st.session_state:
-        st.session_state["orc_versao"] = 0
+    st.session_state.setdefault("orc_versao", 0)
     versao = st.session_state["orc_versao"]
+    cats_edit = df_cat[df_cat["fixo"] == False]
 
-    _, col_limite = st.columns([3, 1])
-    with col_limite:
-        limite_txt = st.text_input("limite mensal do cartão (R$)", value=f"{limite_mensal:.0f}",
-                                    key=f"limite_{versao}")
-    limite_novo = parse_valor(limite_txt)
+    # média dos últimos 3 meses fechados, por categoria
+    _ref = hoje_br().replace(day=1)
+    _lanc = carregar_lancamentos()
+    _media = {}
+    for _ in range(3):
+        _ref = mes_anterior(_ref)
+        _d = filtrar_mes(_lanc, _ref.year, _ref.month)
+        for cid, v in (_d.groupby("categoria")["valor"].sum().items() if not _d.empty else []):
+            _media[cid] = _media.get(cid, 0.0) + v / 3
 
+    with st.container(key="cfg_box_lim"):
+        col_l, col_v = st.columns([2.3, 1.2])
+        with col_l:
+            st.markdown("<div class='cfg-rot'>limite mensal do cartão</div>"
+                        "<div class='cfg-dica'>base dos alertas de fatura e do orçamento</div>",
+                        unsafe_allow_html=True)
+        with col_v:
+            limite_novo = parse_valor(st.text_input("limite (R$)", value=f"{limite_mensal:.0f}",
+                                                    key=f"limite_{versao}", label_visibility="collapsed"))
     st.write("")
 
-    df_cat_edit = df_cat.copy()
-    valores_editados = {}
-    for _, c in df_cat_edit[df_cat_edit["fixo"] == False].iterrows():
-        orcamento_atual = orcamento_categoria(c, limite_mensal)
-        col1, col2 = st.columns([5, 1.1])
-        with col1:
-            st.markdown(f"<div style='padding-top:0.5rem;'>{c['nome'].lower()}</div>", unsafe_allow_html=True)
-        with col2:
-            v_txt = st.text_input("valor", value=f"{orcamento_atual:.0f}",
-                                   key=f"orc_{c['id']}_{versao}", label_visibility="collapsed")
-        valores_editados[c["id"]] = parse_valor(v_txt)
-        st.markdown("<hr style='margin:2px 0;border-color:#242424;'>", unsafe_allow_html=True)
+    valores = {}
+    with st.container(key="cfg_box_cat"):
+        with st.container(key="cfg_cab"):
+            col_n, col_m, col_v = st.columns([2.0, 0.9, 1.2])
+            col_n.markdown("<div class='cfg-cab'>orçamento por categoria</div>", unsafe_allow_html=True)
+            col_m.markdown("<div class='cfg-cab' style='text-align:right;'>média 3m</div>", unsafe_allow_html=True)
+            col_v.markdown("<div class='cfg-cab' style='text-align:right;'>orçamento</div>", unsafe_allow_html=True)
+        for _, c in cats_edit.sort_values("nome").iterrows():
+            with st.container(key=f"cfgrow_{c['id']}"):
+                col_n, col_m, col_v = st.columns([2.0, 0.9, 1.2])
+                with col_n:
+                    st.markdown(f"<div class='cfg-nome'><i style='background:{c['cor']};'></i>{c['nome'].lower()}</div>",
+                                unsafe_allow_html=True)
+                with col_m:
+                    st.markdown(f"<div class='cfg-media'>{formatar_brl(_media.get(c['id'], 0.0)).replace('$', '&#36;')}</div>",
+                                unsafe_allow_html=True)
+                with col_v:
+                    valores[c["id"]] = parse_valor(st.text_input(
+                        "orçamento", value=f"{float(c['valor_alvo'] or 0):.0f}", key=f"orc_{c['id']}_{versao}",
+                        label_visibility="collapsed"))
 
-    soma = sum(valores_editados.values())
-    st.write("")
-    if limite_novo > 0 and soma > limite_novo:
-        st.markdown(f"<span style='color:#e05252;'>excede em {formatar_brl(soma - limite_novo)}</span>", unsafe_allow_html=True)
-    else:
-        st.caption(f"disponível: {formatar_brl(max(0, limite_novo - soma))}")
-
-    with st.expander("+ nova categoria"):
-        col_nome, col_val = st.columns([3, 1])
-        with col_nome:
-            novo_nome = st.text_input("nome da categoria", key="novo_nome")
-        with col_val:
-            novo_valor_txt = st.text_input("limite em R$", key="novo_valor")
-        if st.button("adicionar categoria"):
-            if not novo_nome.strip():
-                st.error("digite o nome da categoria.")
-            else:
-                novo_valor = parse_valor(novo_valor_txt)
-                if novo_valor > 1_000_000:
-                    st.error("valor muito alto — confira se não digitou zeros a mais.")
-                elif limite_novo > 0 and (soma + novo_valor) > limite_novo:
-                    st.error("soma ultrapassaria o limite.")
-                else:
-                    novo_id = "cat_" + str(int(agora_br().timestamp()))
-                    nova_linha = pd.DataFrame([{
-                        "id": novo_id, "nome": novo_nome.strip().lower(), "cor": "#888780",
-                        "valor_alvo": novo_valor,
-                        "fixo": False,
-                    }])
-                    df_final = pd.concat([df_cat_edit, nova_linha], ignore_index=True)
-                    salvar_configuracoes(limite_novo, df_final)
-                    st.session_state["orc_versao"] += 1
-                    st.success(f"'{novo_nome.strip().lower()}' adicionada.")
-                    st.rerun(scope="app")
+        # distribuição do limite entre as categorias
+        soma = sum(valores.values())
+        pct = soma / limite_novo if limite_novo > 0 else 0
+        excede = limite_novo > 0 and soma > limite_novo
+        cor = "#e05252" if excede else "#6b7280"
+        sobra = (f"<span style='color:#e05252;'>passa {formatar_brl(soma - limite_novo)} do limite</span>" if excede
+                 else f"sobra {formatar_brl(max(limite_novo - soma, 0))} sem categoria")
+        st.markdown(
+            "<div class='cfg-dist'><div class='cat-top'><span>distribuído "
+            f"{formatar_brl(soma)} de {formatar_brl(limite_novo)}</span><span class='cat-dir'>{sobra}</span></div>"
+            f"<div class='cat-bar'><div style='width:{min(pct, 1) * 100:.1f}%;background:{cor};'></div></div></div>"
+            .replace("$", "&#36;"), unsafe_allow_html=True)
 
     st.write("")
-    if st.button("salvar orçamento", use_container_width=True):
+    with st.container(key="novo_cfg"):
+        col_nova, col_salvar = st.columns([1, 1])
+        with col_nova:
+            if st.button("+ nova categoria", use_container_width=True):
+                dialogo_nova_categoria(limite_mensal)
+        with col_salvar:
+            salvar = st.button("salvar", use_container_width=True)
+    if salvar:
         if limite_novo <= 0:
-            st.error("informe um limite mensal válido antes de salvar.")
-        elif any(v > 1_000_000 for v in valores_editados.values()):
-            st.error("algum valor de categoria está muito alto — confira se não digitou zeros a mais.")
-        elif soma > limite_novo:
-            st.error("soma ultrapassa o limite.")
+            st.error("informe um limite mensal válido.")
+        elif any(v > 1_000_000 for v in valores.values()):
+            st.error("algum valor está muito alto — confira se não digitou zeros a mais.")
+        elif excede:
+            st.error("a soma das categorias passa do limite.")
         else:
-            df_cat_edit.loc[df_cat_edit["fixo"] == False, "valor_alvo"] = df_cat_edit[df_cat_edit["fixo"] == False]["id"].map(
-                lambda i: valores_editados[i]
-            )
-            salvar_configuracoes(limite_novo, df_cat_edit)
+            df_salvar = df_cat.copy()
+            df_salvar.loc[df_salvar["id"].isin(valores), "valor_alvo"] = df_salvar["id"].map(valores)
+            salvar_configuracoes(limite_novo, df_salvar)
             st.session_state["orc_versao"] += 1
-            st.success("orçamento salvo!")
-            st.rerun(scope="app")
-
+            _fechar("configurações salvas!")
