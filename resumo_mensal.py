@@ -16,7 +16,8 @@ import os
 import json
 import smtplib
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -255,7 +256,7 @@ def enviar_email(caminho_pdf, ref):
 # ───────────────────────── MAIN ─────────────────────────
 
 def main():
-    hoje = date.today()
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()   # horário de Brasília
     ref = mes_anterior(hoje)  # resumo é sempre do mês que ACABOU de fechar
 
     df_lanc, df_cat, limite = carregar_dados()
