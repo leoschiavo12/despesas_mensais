@@ -693,7 +693,7 @@ def excluir_nota(tipo, data_txt, valor, descricao):
 # ── fluxo da PF (resumos das abas receitas e despesas) ──
 # mesma conta do fluxo do SmartWallet: no mês k entram na PF o pró-labore líquido e os lucros
 # das notas emitidas em k−1, os reembolsos, as entradas PIX e os dividendos; saem a fatura do
-# cartão de k−1, o FIES e as saídas PIX. parâmetros lidos das abas pj_parametros /
+# cartão de k−1, o FIES, as saídas PIX e o total investido. parâmetros lidos das abas pj_parametros /
 # pj_parametros_hist / pf_cartao / dividendos_mensais da planilha da carteira.
 
 PJ_PAR_PADRAO = {"faturamento_minimo": 0.0, "prev_pct": 0.0, "pro_labore": 0.0, "inss_pct": 11.0,
@@ -806,12 +806,15 @@ def fluxo_pf(ref, df_notas):
         cartao = cartao_do_mes(ant)
     pix = filtrar_mes(carregar_pix(), ref.year, ref.month)
     _px = lambda t: float(pix[pix["tipo"] == t]["valor"].sum()) if not pix.empty else 0.0
+    # total investido no mês (compras − vendas), o mesmo "total investido" do fluxo do SmartWallet
+    inv = filtrar_mes(carregar_investimentos(), ref.year, ref.month)
+    _iv = lambda t: float(inv[inv["tipo"] == t]["total"].sum()) if not inv.empty else 0.0
     return {
         "entradas": [("lucros distribuídos", lucros), ("pró-labore líquido", pl_liq),
                      ("reembolsos", par["reembolso_base"] + _n(ref, "reembolso")),
                      ("outras receitas PIX", _px("entrada")), ("dividendos", base["divs"].get(k, 0.0))],
         "saidas": [(f"fatura de {mes_label(ant)}", cartao), ("FIES", fies),
-                   ("outras despesas PIX", _px("saida"))],
+                   ("outras despesas PIX", _px("saida")), ("investido", _iv("compra") - _iv("venda"))],
         "tem_div": k in base["divs"],
     }
 
@@ -1416,7 +1419,9 @@ with aba_lancar:
     st.write("")
     # resumo: o que saiu da conta PF no mês (fatura do mês anterior, FIES e outras despesas PIX)
     try:
-        render_lista_pf(f"saiu da conta em {MESES_EXT[ref.month - 1]}", fluxo_pf(ref, carregar_notas())["saidas"], "neg")
+        # o investido fica de fora aqui (tem a aba investimentos); a aba resumo mostra tudo junto
+        render_lista_pf(f"saiu da conta em {MESES_EXT[ref.month - 1]}",
+                        [x for x in fluxo_pf(ref, carregar_notas())["saidas"] if x[0] != "investido"], "neg")
     except Exception as e:
         st.warning(f"não foi possível montar o resumo da PF ({str(e)[:60]})")
     st.write("")
@@ -1607,10 +1612,8 @@ with aba_resumo:
     ref_res = st.session_state["mes_ref"]
     try:
         _fx = fluxo_pf(ref_res, carregar_notas())
-        _inv = filtrar_mes(carregar_investimentos(), ref_res.year, ref_res.month)
-        _ti = lambda t: float(_inv[_inv["tipo"] == t]["total"].sum()) if not _inv.empty else 0.0
         _ent = sorted([(r, v) for r, v in _fx["entradas"] if abs(v) >= 0.005], key=lambda x: -x[1])
-        _sai = sorted([(r, v) for r, v in _fx["saidas"] + [("investido", _ti("compra") - _ti("venda"))]
+        _sai = sorted([(r, v) for r, v in _fx["saidas"]
                        if abs(v) >= 0.005], key=lambda x: -x[1])
         _itens = [("entradas", 0, "sec")] + [(r, v, "pos" if v >= 0 else "neg") for r, v in _ent] \
             + [("saídas", 0, "sec")] + [(r, -v, "neg" if v >= 0 else "pos") for r, v in _sai]
