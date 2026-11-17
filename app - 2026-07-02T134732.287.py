@@ -243,7 +243,13 @@ table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250
 .cat-bar { position: relative; height: 5px; background: #202024; border-radius: 4px; margin: 5px 0 3px; }
 .cat-bar > div { height: 100%; border-radius: 4px; }
 .cat-sub { font-size: 0.68rem; color: #7a7a7a; }
-[class*="st-key-hist_filtros"] [data-testid="stHorizontalBlock"] { align-items: center; }
+[class*="st-key-hcab_"] [data-testid="stHorizontalBlock"] { align-items: center !important; flex-wrap: nowrap !important; }
+.h-cab { font-size: 0.75rem; color: rgba(250,250,250,0.55); }
+[class*="st-key-hcab_"] [data-testid="stPopover"] { display: flex; justify-content: flex-end; }
+[class*="st-key-hcab_"] [data-testid="stPopover"] button { border: none !important; background: transparent !important;
+    padding: 0 0.2rem !important; min-height: 0 !important; height: auto !important; font-size: 0.75rem !important;
+    color: #9a9a9a !important; box-shadow: none !important; }
+[class*="st-key-hcab_"] [data-testid="stPopover"] button p { font-size: 0.75rem !important; }
 .h-dia { display: flex; justify-content: space-between; font-size: 0.68rem; text-transform: uppercase;
     letter-spacing: 0.05em; color: rgba(250,250,250,0.45); margin: 0.9rem 0.2rem 0.15rem; }
 .h-lin { display: flex; align-items: center; padding: 0.45rem 0.2rem; border-bottom: 1px solid rgba(250,250,250,0.06);
@@ -269,6 +275,7 @@ table.pf-tab tr.tot td { border-bottom: none !important; color: rgba(250,250,250
     white-space: nowrap; }
 .cfg-nome { font-size: 0.84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cfg-nome i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.cfg-lapis { font-size: 0.7rem; color: #6b6b6b; margin-left: 6px; }
 .cfg-media { font-size: 0.74rem; color: #8a8a8a; text-align: right; white-space: nowrap; }
 .cfg-dist { margin-top: 0.6rem; }
 div[class*="st-key-novo_cfg"] button { min-height: var(--altura-campo) !important; height: var(--altura-campo) !important;
@@ -714,7 +721,8 @@ def carregar_notas():
             df["data_txt"] = df["data"].astype(str)
             df["data"] = pd.to_datetime(df["data"].astype(str), dayfirst=True, errors="coerce").dt.date
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0)
-            df["tipo"] = df["tipo"].astype(str).str.strip().str.lower()
+            df["tipo_planilha"] = df["tipo"].astype(str).str.strip().str.lower()
+            df["tipo"] = df["tipo_planilha"].apply(lambda t: "reembolso" if t.startswith("reemb") else "nota fiscal")
             df = df.dropna(subset=["data"])
         st.session_state["df_notas"] = df
     return st.session_state["df_notas"]
@@ -877,7 +885,7 @@ def render_resumo(titulo, itens, rotulo_total, total):
     """painel no estilo do resumo da carteira (SmartWallet › mês › resumo): título pequeno, lista
     e o total discreto na última linha. itens: [(rótulo, valor, classe)] · classe 'pos' (verde),
     'neg' (vermelho), '' (cor padrão) ou 'sec' (subtítulo de grupo, sem valor)"""
-    brl = lambda v: ("−" if v < -0.004 else "") + ("R$ " + f"{abs(v):.0f}").replace("$", "&#36;")
+    brl = lambda v: ("−" if v < -0.004 else "") + ("R$" + f"{abs(v):.0f}").replace("$", "&#36;")
     linhas = "".join(f"<tr class='sec'><td colspan='2'>{r}</td></tr>" if c == "sec"
                      else f"<tr><td>{r}</td><td class='{c}'>{brl(v)}</td></tr>" for r, v, c in itens) \
         or "<tr><td style='color:#888;'>nada neste mês</td><td></td></tr>"
@@ -915,12 +923,12 @@ def salvar_configuracoes(limite, df_categorias):
 # ───────────────────────── FORMATAÇÃO ─────────────────────────
 
 def formatar_brl(valor):
-    return "R$ " + f"{valor:.0f}"
+    return "R$" + f"{valor:.0f}"
 
 
 def fmt_brl2(valor):
-    """com centavos, pt-BR: R$ 1.234,56"""
-    return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    """com centavos, pt-BR: R$1.234,56"""
+    return "R$" + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def fmt_qtd(q):
@@ -1221,7 +1229,7 @@ def render_lista_dias(itens, prefixo, abrir, vazio):
                 f"<div class='h-txt'><div class='h-tit'>{it['titulo']}</div>"
                 f"<div class='h-sub'>{it['sub']}</div></div>"
                 f"<div class='h-val'>{it['valor_html']}</div></div>", unsafe_allow_html=True)
-            if st.button(it["titulo"], key=f"hbtn_{prefixo}{i}"):
+            if it["item"] is not None and st.button(it["titulo"], key=f"hbtn_{prefixo}{i}"):
                 st.session_state.pop("_conf_del", None)
                 abrir(it["item"])
     if len(itens) > lim:
@@ -1229,29 +1237,46 @@ def render_lista_dias(itens, prefixo, abrir, vazio):
                   on_click=lambda: st.session_state.update({chave_lim: lim + 30}))
 
 
-def filtro_tipo(prefixo, opcoes):
-    """filtro em botões (todos · ...) acima do histórico"""
-    with st.container(key=f"hist_filtros_{prefixo}"):
-        return st.segmented_control("filtro", opcoes, default=opcoes[0], key=f"{prefixo}_filtro",
-                                    label_visibility="collapsed") or opcoes[0]
+def filtros_hist(prefixo, specs, titulo="histórico"):
+    """cabeçalho do histórico: título à esquerda e um botão discreto "filtrar" à direita, que abre
+    as opções. com filtro ativo, o botão mostra o que está filtrado.
+    specs: [(chave, rótulo, opções, formato)] — a 1ª opção é sempre "sem filtro". retorna {chave: valor}"""
+    chaves = {k: f"{prefixo}_f_{k}" for k, _, _, _ in specs}
+    for k, _, ops, _ in specs:
+        if st.session_state.get(chaves[k]) not in ops:
+            st.session_state[chaves[k]] = ops[0]
+    ativos = [fmt(st.session_state[chaves[k]]) for k, _, ops, fmt in specs if st.session_state[chaves[k]] != ops[0]]
+
+    def _limpar():
+        for k, _, ops, _ in specs:
+            st.session_state[chaves[k]] = ops[0]
+
+    with st.container(key=f"hcab_{prefixo}"):
+        col_t, col_f = st.columns([1.4, 1])
+        with col_t:
+            st.markdown(f"<div class='h-cab'>{titulo}</div>", unsafe_allow_html=True)
+        with col_f:
+            with st.popover(("filtro: " + " · ".join(ativos)) if ativos else "filtrar"):
+                for k, rot, ops, fmt in specs:
+                    if len(ops) <= 4:
+                        st.radio(rot, ops, key=chaves[k], format_func=fmt, horizontal=True)
+                    else:
+                        st.selectbox(rot, ops, key=chaves[k], format_func=fmt)
+                if ativos:
+                    st.button("limpar filtro", key=f"{prefixo}_f_limpar", on_click=_limpar,
+                              use_container_width=True)
+    return {k: st.session_state[chaves[k]] for k in chaves}
 
 
 def render_historico(df_mes, df_pix, df_cat, ref):
     """histórico de despesas do mês (cartão + pix): filtros de pagamento e categoria"""
     nomes = dict(zip(df_cat["id"], df_cat["nome"].str.lower()))
     cores = dict(zip(df_cat["id"], df_cat["cor"]))
-    st.session_state.setdefault("hist_cat", "__todas__")
-    if st.session_state["hist_cat"] not in nomes:
-        st.session_state["hist_cat"] = "__todas__"
-    with st.container(key="hist_filtros"):
-        col_pag, col_cat = st.columns([1.15, 1])
-        with col_pag:
-            pag = st.segmented_control("pagamento", ["todos", "cartão", "pix"], default="todos",
-                                       key="hist_pag", label_visibility="collapsed") or "todos"
-        with col_cat:
-            cat = st.selectbox("categoria", ["__todas__"] + sorted(nomes, key=lambda x: nomes[x]), key="hist_cat",
-                               format_func=lambda x: "todas as categorias" if x == "__todas__" else nomes[x],
-                               label_visibility="collapsed")
+    f = filtros_hist("d", [
+        ("pag", "pagamento", ["todos", "cartão", "pix"], str),
+        ("cat", "categoria", ["__todas__"] + sorted(nomes, key=lambda x: nomes[x]),
+         lambda x: "todas as categorias" if x == "__todas__" else nomes.get(x, x))])
+    pag, cat = f["pag"], f["cat"]
 
     _cart = df_mes.iloc[::-1].assign(pagamento="cartão") if not df_mes.empty else df_mes
     _pix = (df_pix.iloc[::-1][["data", "categoria", "descricao", "valor"]].assign(pagamento="pix")
@@ -1459,7 +1484,8 @@ def dialogo_receita(item=None, erro_notas=None):
             elif erro_notas:
                 st.error(erro_notas)
             elif item:
-                atualizar_nota(tipo, item["data_txt"], item["valor"], item["descricao"], data_lanc, valor, descricao)
+                atualizar_nota(item.get("tipo_planilha", tipo), item["data_txt"], item["valor"], item["descricao"],
+                               data_lanc, valor, descricao)
                 _fechar("alterado!")
             else:
                 salvar_nota(tipo, data_lanc, valor, descricao)
@@ -1473,7 +1499,8 @@ def dialogo_receita(item=None, erro_notas=None):
             if item["origem"] == "pix":
                 excluir_pix(item["data"].isoformat(), "entrada", item["categoria"], item["descricao"], item["valor"])
             else:
-                excluir_nota(item["tipo"], item["data_txt"], item["valor"], item["descricao"])
+                excluir_nota(item.get("tipo_planilha", item["tipo"]), item["data_txt"], item["valor"],
+                             item["descricao"])
         botao_excluir(_excluir, "rec", "excluir receita")
 
 
@@ -1657,26 +1684,37 @@ with aba_receitas:
     st.write("")
 
     # histórico: notas pelo valor bruto, na data de emissão; reembolsos e pix de entrada
-    filtro_rec = filtro_tipo("r", ["todas", "notas", "reembolsos", "pix"])
+    filtro_rec = filtros_hist("r", [("tipo", "tipo", ["todas", "notas", "reembolsos", "pix"], str)])["tipo"]
     _cor_rec = {"nota fiscal": "#1D9E75", "reembolso": "#7F77DD", "pix": "#BA7517"}
     itens = []
     if not df_notas_mes.empty:
         for _, r in df_notas_mes.iloc[::-1].iterrows():
-            itens.append({"origem": "nota", "tipo": r["tipo"], "data": r["data"], "valor": float(r["valor"]),
+            itens.append({"origem": "nota", "tipo": r["tipo"], "tipo_planilha": r["tipo_planilha"],
+                          "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "data_txt": r["data_txt"]})
     if not df_pix_rec.empty:
         for _, r in df_pix_rec.iloc[::-1].iterrows():
             itens.append({"origem": "pix", "tipo": "pix", "data": r["data"], "valor": float(r["valor"]),
                           "descricao": str(r.get("descricao", "") or ""), "categoria": r["categoria"]})
+    # reembolso base (parâmetro mensal do SmartWallet): entra todo mês sem lançamento; aparece no dia 1º
+    try:
+        _base = par_vigente(carregar_base_pf()["par"], carregar_base_pf()["hist"],
+                            ref_rec.strftime("%Y-%m"))["reembolso_base"]
+    except Exception:
+        _base = 0.0
+    if _base > 0.005:
+        itens.append({"origem": "base", "tipo": "reembolso", "data": ref_rec, "valor": float(_base),
+                      "descricao": "reembolso base"})
     _mapa_f = {"notas": "nota fiscal", "reembolsos": "reembolso", "pix": "pix"}
     if filtro_rec != "todas":
         itens = [it for it in itens if it["tipo"] == _mapa_f[filtro_rec]]
     itens.sort(key=lambda x: x["data"], reverse=True)
     render_lista_dias(
-        [{"data": it["data"], "titulo": it["descricao"] or it["tipo"], "sub": it["tipo"],
+        [{"data": it["data"], "titulo": it["descricao"] or it["tipo"],
+          "sub": it["tipo"] + ("<span class='chip'>automático</span>" if it["origem"] == "base" else ""),
           "cor": _cor_rec.get(it["tipo"], "#666"),
           "valor_html": f"<span style='color:#1D9E75;'>{formatar_brl(it['valor']).replace('$', '&#36;')}</span>",
-          "soma": it["valor"], "item": it} for it in itens],
+          "soma": it["valor"], "item": None if it["origem"] == "base" else it} for it in itens],
         "r", lambda it: dialogo_receita(it, erro_notas),
         "nada com esse filtro." if filtro_rec != "todas" else "nenhuma receita neste mês.")
 
@@ -1697,17 +1735,17 @@ with aba_invest:
 
     df_inv_mes = filtrar_mes(df_inv, ref_inv.year, ref_inv.month)
     _tot = lambda d, t: float(d[d["tipo"] == t]["total"].sum()) if not d.empty else 0.0
-    # média do líquido (compras − vendas) dos 6 meses anteriores ao mês exibido
+    # média do saldo (vendas − compras) dos 6 meses anteriores ao mês exibido
     _liq, _m = [], ref_inv
     for _ in range(6):
         _m = mes_anterior(_m)
         _d = filtrar_mes(df_inv, _m.year, _m.month)
-        _liq.append(_tot(_d, "compra") - _tot(_d, "venda"))
+        _liq.append(_tot(_d, "venda") - _tot(_d, "compra"))
     _compras, _vendas = _tot(df_inv_mes, "compra"), _tot(df_inv_mes, "venda")
     render_resumo(f"investimentos em {MESES_EXT[ref_inv.month - 1]}",
-                  [("compras", _compras, "pos" if _compras else ""), ("vendas", -_vendas, "neg" if _vendas else ""),
+                  [("compras", -_compras, "neg" if _compras else ""), ("vendas", _vendas, "pos" if _vendas else ""),
                    ("média dos últimos 6 meses", sum(_liq) / 6, "")],
-                  "saldo", _compras - _vendas)
+                  "saldo", _vendas - _compras)
     if erro_inv:
         st.warning(erro_inv)
     st.write("")
@@ -1722,7 +1760,7 @@ with aba_invest:
     st.write("")
 
     # histórico: compras e vendas; tocar na linha abre a edição (com excluir)
-    filtro_inv = filtro_tipo("i", ["todos", "compras", "vendas"])
+    filtro_inv = filtros_hist("i", [("tipo", "tipo", ["todos", "compras", "vendas"], str)])["tipo"]
     _cor_cls = {"FII": "#639922", "ETF": "#378ADD", "Cripto": "#E5B800", "Tesouro Direto": "#7F77DD"}
     itens_inv = []
     if not df_inv_mes.empty:
@@ -1731,6 +1769,7 @@ with aba_invest:
                   "quantidade": float(r["quantidade"]), "preco": float(r["preco"]), "total": float(r["total"])}
             if filtro_inv == "compras" and it["tipo"] != "compra" or filtro_inv == "vendas" and it["tipo"] != "venda":
                 continue
+            # do ponto de vista da conta: compra é saída (vermelho), venda é entrada (verde)
             venda = it["tipo"] == "venda"
             _v = formatar_brl(it["total"]).replace("$", "&#36;")
             itens_inv.append({
@@ -1738,9 +1777,9 @@ with aba_invest:
                 "sub": f"{fmt_qtd(it['quantidade'])} × {fmt_brl2(it['preco'])}".replace("$", "&#36;")
                        + f"<span class='chip'>{it['tipo']}</span>",
                 "cor": _cor_cls.get(it["classe"], "#666"),
-                "valor_html": (f"<span style='color:#e05252;'>−{_v}</span>" if venda
-                               else f"<span style='color:#1D9E75;'>{_v}</span>" if it["tipo"] == "compra" else _v),
-                "soma": -it["total"] if venda else it["total"], "item": it})
+                "valor_html": (f"<span style='color:#1D9E75;'>{_v}</span>" if venda
+                               else f"<span style='color:#e05252;'>−{_v}</span>" if it["tipo"] == "compra" else _v),
+                "soma": it["total"] if venda else -it["total"], "item": it})
     render_lista_dias(itens_inv, "i", lambda it: dialogo_investimento(df_inv, ativos_inv, it),
                       "nada com esse filtro." if filtro_inv != "todos" else "nenhum investimento neste mês.")
 
@@ -1796,6 +1835,58 @@ def dialogo_nova_categoria(limite_salvo):
                 _fechar(f"'{nome}' adicionada!")
 
 
+def mover_categoria(de, para):
+    """troca a categoria 'de' por 'para' em todos os lançamentos (cartão, arquivo_AAAA e pix)"""
+    sh = get_spreadsheet()
+    for ws in sh.worksheets():
+        if ws.title in (ABA_LANCAMENTOS, ABA_PIX) or ws.title.startswith("arquivo_"):
+            vals = ws.get_all_values()
+            if not vals or "categoria" not in vals[0]:
+                continue
+            col = vals[0].index("categoria") + 1
+            cel = [gspread.Cell(i, col, para) for i, r in enumerate(vals[1:], start=2)
+                   if len(r) >= col and r[col - 1] == de]
+            if cel:
+                ws.update_cells(cel)
+    recarregar_lancamentos()
+    st.session_state.pop("df_pix", None)
+    st.session_state.pop("cartao_arquivo", None)
+
+
+@st.dialog("editar categoria")
+def dialogo_categoria(cid):
+    c = df_cat[df_cat["id"] == cid].iloc[0]
+    with st.form("form_edit_cat", border=False):
+        col_nome, col_cor = st.columns([2, 1])
+        with col_nome:
+            nome = st.text_input("nome", value=c["nome"].lower())
+        with col_cor:
+            cor = st.color_picker("cor", value=c["cor"] if str(c["cor"]).startswith("#") else "#888780")
+        if st.form_submit_button("salvar", use_container_width=True):
+            nome = (nome or "").strip().lower()
+            if not nome:
+                st.error("digite o nome da categoria.")
+            elif nome in set(df_cat[df_cat["id"] != cid]["nome"].str.lower()):
+                st.error("já existe uma categoria com esse nome.")
+            else:
+                df_novo = df_cat.copy()
+                df_novo.loc[df_novo["id"] == cid, ["nome", "cor"]] = [nome, cor]
+                salvar_configuracoes(limite_mensal, df_novo)
+                _fechar("categoria alterada!")
+
+    # excluir: os lançamentos dessa categoria passam para outra, escolhida aqui
+    outras = df_cat[df_cat["id"] != cid]
+    st.markdown("<div class='h-cab' style='margin-top:0.6rem;'>excluir categoria</div>", unsafe_allow_html=True)
+    destino = st.selectbox("mover os lançamentos para", outras["id"].tolist(),
+                           format_func=lambda x: outras.set_index("id").loc[x, "nome"].lower(),
+                           index=(outras["id"].tolist().index("outros") if "outros" in outras["id"].tolist() else 0))
+
+    def _excluir():
+        mover_categoria(cid, destino)
+        salvar_configuracoes(limite_mensal, df_cat[df_cat["id"] != cid])
+    botao_excluir(_excluir, "cat", "excluir categoria")
+
+
 with aba_orc:
     st.session_state.setdefault("orc_versao", 0)
     versao = st.session_state["orc_versao"]
@@ -1833,8 +1924,13 @@ with aba_orc:
             with st.container(key=f"cfgrow_{c['id']}"):
                 col_n, col_m, col_v = st.columns([2.0, 0.9, 1.2])
                 with col_n:
-                    st.markdown(f"<div class='cfg-nome'><i style='background:{c['cor']};'></i>{c['nome'].lower()}</div>",
-                                unsafe_allow_html=True)
+                    # tocar no nome abre a edição (nome, cor, excluir)
+                    with st.container(key=f"hrow_cfg{c['id']}"):
+                        st.markdown(f"<div class='cfg-nome'><i style='background:{c['cor']};'></i>{c['nome'].lower()}"
+                                    f"<span class='cfg-lapis'>✎</span></div>", unsafe_allow_html=True)
+                        if st.button(c["nome"], key=f"hbtn_cfg{c['id']}"):
+                            st.session_state.pop("_conf_del", None)
+                            dialogo_categoria(c["id"])
                 with col_m:
                     st.markdown(f"<div class='cfg-media'>{formatar_brl(_media.get(c['id'], 0.0)).replace('$', '&#36;')}</div>",
                                 unsafe_allow_html=True)
